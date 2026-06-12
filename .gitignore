@@ -1,0 +1,49 @@
+# Fichiers de modèles lourds
+.deepface/
+.insightface/
+*.h5
+*.hdf5
+*.pkl
+*.index
+*.pth
+*.pt
+*.onnx
+
+# Fichiers de données
+Dataset/*.jpg
+Dataset/*.jpeg
+Dataset/*.png
+Dataset/*.JPG
+Dataset/*.JPEG
+Dataset/*.PNG
+
+# Fichiers CSV de présence
+camera_system/attendance_*.csv
+camera_system/students_metadata.pkl
+camera_system/facerec_faiss.index
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
