@@ -23,7 +23,7 @@ class LocalVectorDB:
     Photo d'identité ➔ MTCNN ➔ Alignement ➔ ArcFace ➔ Stockage dans le fichier FAISS (.index + .pkl)
     """
     
-    def __init__(self, index_path="facerec_faiss.index", metadata_path="students_metadata.pkl", dimension=512):
+    def __init__(self, index_path="data/facerec_faiss.index", metadata_path="data/students_metadata.pkl", dimension=512):
         """
         Initialise ou charge une base de données FAISS existante.
         
@@ -36,6 +36,12 @@ class LocalVectorDB:
         self.metadata_path = metadata_path
         self.dimension = dimension
         self.next_id = 0
+        
+        # Sécurité : Créer automatiquement le dossier parent (ex: 'data/') s'il n'existe pas
+        if os.path.dirname(index_path):
+            os.makedirs(os.path.dirname(index_path), exist_ok=True)
+        if os.path.dirname(metadata_path):
+            os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
         
         # Charger ou créer l'index FAISS
         if os.path.exists(index_path):
@@ -107,8 +113,6 @@ class LocalVectorDB:
             "original_embeddings": embeddings  # Stocker pour futur ajout
         }
         
-        logger.info(f"Étudiant enregistré: ID={id_num}, Matricule={matricule}, Nom={nom}, Prénom={prenom}, Photos={len(embeddings)}")
-        
         # Sauvegarder les fichiers
         self.save()
     
@@ -132,7 +136,6 @@ class LocalVectorDB:
         distances, indices = self.index.search(embedding_float32, k=1)
         
         # CORRECTION 3 : IndexFlatIP retourne DIRECTEMENT la similarité cosinus.
-        # Plus besoin d'inverser avec 1.0 - distance.
         similarity = float(distances[0][0])
         matched_id = int(indices[0][0])
         

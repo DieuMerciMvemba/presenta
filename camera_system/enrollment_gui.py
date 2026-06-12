@@ -390,10 +390,14 @@ class EnrollmentGUI:
     def execute_enrollment(self, matricule, nom, prenom, photo_paths):
         """Exécute la commande d'enrôlement via subprocess dans un thread séparé."""
         try:
+            # Chemin absolu du script enroll.py
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            enroll_script = os.path.join(script_dir, "enroll.py")
+            
             # Construire la commande avec toutes les photos
             command = [
                 sys.executable,
-                "enroll.py",
+                enroll_script,
                 "enroll",
                 "--matricule", matricule,
                 "--nom", nom,
@@ -655,10 +659,14 @@ class EnrollmentGUI:
                     return
                 
                 try:
+                    # Chemin absolu du script enroll.py
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    enroll_script = os.path.join(script_dir, "enroll.py")
+                    
                     # Utiliser subprocess pour appeler la commande
                     command = [
                         sys.executable,
-                        "enroll.py",
+                        enroll_script,
                         "add-photos",
                         "--matricule", matricule
                     ]

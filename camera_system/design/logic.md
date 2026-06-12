@@ -197,9 +197,11 @@ tk.Frame(
 - **Pas d'animations** (transitions statiques)
 - **Thème ttk standard** (pas de custom theme)
 
+Base de donnee : sql-lite en attendant apres synchro dans Mysql
+
 ## 🔄 Pour Reproduire le Design
 
-1. **Utiliser Tkinter** avec ttk
+1. **Utiliser kivy** avec les widgets de base
 2. **Appliquer la palette** UCC_BLUE comme couleur principale
 3. **Structure**: Header + Sidebar + Main Content
 4. **Composants**: Treeview pour tableaux, Canvas pour vidéo
