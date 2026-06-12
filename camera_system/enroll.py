@@ -308,12 +308,16 @@ def check_attendance(group_photo_path, threshold=0.5):
             else:
                 logger.info(f"Visage #{i+1} non reconnu (similarité <= {threshold})")
         
-        # Générer le rapport CSV
+        # Sécurité : Créer le dossier 'reports/' s'il n'existe pas encore
+        reports_dir = "reports"
+        os.makedirs(reports_dir, exist_ok=True)
+
+        # Générer le rapport CSV à l'intérieur du dossier 'reports/'
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        csv_filename = f"attendance_UCC_{timestamp}.csv"
+        csv_filename = os.path.join(reports_dir, f"attendance_UCC_{timestamp}.csv")
         
         with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['Matricule', 'Nom', 'Prénom', 'Statut', 'Distance']
+            fieldnames = ['Matricule', 'Nom', 'Prénom', 'Statut', 'Similarité']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             
             writer.writeheader()
@@ -323,7 +327,7 @@ def check_attendance(group_photo_path, threshold=0.5):
                     'Nom': student['nom'],
                     'Prénom': student['prenom'],
                     'Statut': 'PRESENT',
-                    'Similarity': f"{student['similarity']:.4f}"
+                    'Similarité': f"{student['similarity']:.4f}"
                 })
         
         logger.info("=" * 70)
