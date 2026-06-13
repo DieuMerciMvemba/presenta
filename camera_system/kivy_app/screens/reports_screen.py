@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from services.report_watcher_service import ReportWatcherService
 from services.report_analytics_service import ReportAnalyticsService
+from services.mysql_service import MySQLService
 
 Builder.load_string('''
 <ReportsScreen>:
@@ -530,6 +531,20 @@ class ReportsScreen(Screen):
         self.report_watcher = ReportWatcherService(watch_folder="reports")
         self.report_analytics = ReportAnalyticsService()
         
+        # Initialiser MySQLService pour les statistiques de présence
+        try:
+            self.db_service = MySQLService(
+                host='localhost',
+                database='ucc_face_recognition',
+                user='root',
+                password='admin123',
+                port=3306
+            )
+            print("✅ MySQLService initialisé dans ReportsScreen")
+        except Exception as e:
+            print(f"❌ Erreur lors de l'initialisation de MySQLService: {e}")
+            self.db_service = None
+        
         # Configurer le callback pour les nouveaux fichiers
         self.report_watcher.add_callback(self.on_new_report)
         
@@ -569,12 +584,23 @@ class ReportsScreen(Screen):
         self.refresh_report_list()
     
     def update_statistics(self):
-        """Met à jour les statistiques affichées"""
+        """Met à jour les statistiques affichées avec les données réelles de MySQL"""
+        # Mettre à jour les statistiques depuis les fichiers de rapports
         summary = self.report_analytics.get_summary_report()
-        
         self.total_reports = summary.get('total_reports', 0)
         self.total_rows = summary.get('total_rows', 0)
         self.file_types_count = len(summary.get('report_types', {}))
+        
+        # Mettre à jour les statistiques de présence depuis MySQL
+        if self.db_service:
+            try:
+                stats = self.db_service.get_statistics()
+                # Ces statistiques pourraient être utilisées pour les graphiques
+                self.total_students = stats.get('total_students', 0)
+                self.total_attendance = stats.get('total_attendance', 0)
+                print(f"📊 Statistiques MySQL: {stats}")
+            except Exception as e:
+                print(f"❌ Erreur lors de la récupération des statistiques MySQL: {e}")
     
     def refresh_report_list(self):
         """Rafraîchit la liste des rapports affichée"""

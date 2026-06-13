@@ -31,6 +31,7 @@ from screens.attendance_screen import AttendanceScreen
 from screens.organization_screen import OrganizationScreen
 from screens.reports_screen import ReportsScreen
 from screens.settings_screen import SettingsScreen
+from screens.enrollment_screen import EnrollmentScreen
 
 from widgets.ucc_button import UCCButton
 from widgets.header import Header
@@ -130,6 +131,7 @@ class UCCFaceRecognitionApp(App):
         # Ajouter les écrans
         dashboard = DashboardScreen(name='dashboard')
         students = StudentsScreen(name='students')
+        enrollment = EnrollmentScreen(name='enrollment')
         attendance = AttendanceScreen(name='attendance')
         organization = OrganizationScreen(name='organization')
         reports = ReportsScreen(name='reports')
@@ -137,6 +139,7 @@ class UCCFaceRecognitionApp(App):
         
         sm.add_widget(dashboard)
         sm.add_widget(students)
+        sm.add_widget(enrollment)
         sm.add_widget(attendance)
         sm.add_widget(organization)
         sm.add_widget(reports)
@@ -167,6 +170,7 @@ class UCCFaceRecognitionApp(App):
         print("Écrans disponibles:")
         print("  - dashboard: Tableau de bord")
         print("  - students: Gestion des étudiants")
+        print("  - enrollment: Enrôlement des étudiants")
         print("  - attendance: Pointage caméra")
         print("  - organization: Organisation")
         print("  - reports: Rapports")

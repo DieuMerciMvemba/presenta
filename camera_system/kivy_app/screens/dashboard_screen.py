@@ -8,14 +8,14 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.graphics import Color, Rectangle
-from kivy.properties import NumericProperty, StringProperty
+from kivy.properties import NumericProperty, StringProperty, ListProperty
 from kivy.lang import Builder
 from kivy.clock import Clock
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from services.database_service import DatabaseService
+from services.mysql_service import MySQLService
 
 Builder.load_string('''
 <DashboardScreen>:
@@ -357,15 +357,17 @@ Builder.load_string('''
                         height: 45
                         font_name: 'Arial'
                         font_size: 12
+                        on_release: root.go_to_students()
                         
                     Button:
                         text: '📸 Démarrer Pointage'
-                        background_color: 0.16, 0.65, 0.26, 1.0  # ACCENT_GREEN
+                        background_color: 0.16, 0.65, 0.27, 1.0  # ACCENT_GREEN
                         color: 1, 1, 1, 1
                         size_hint_y: None
                         height: 45
                         font_name: 'Arial'
                         font_size: 12
+                        on_release: root.go_to_attendance()
                         
                     Button:
                         text: '📊 Générer Rapport'
@@ -375,6 +377,7 @@ Builder.load_string('''
                         height: 45
                         font_name: 'Arial'
                         font_size: 12
+                        on_release: root.go_to_reports()
                 
                 BoxLayout:
                     size_hint_y: 1
@@ -388,13 +391,20 @@ Builder.load_string('''
                     size_hint_y: None
                     height: 30
                 
-                Label:
-                    text: 'Aucun pointage récent'
-                    font_name: 'Arial'
-                    font_size: 13
-                    color: 0.42, 0.46, 0.49, 1  # TEXT_SECONDARY
+                # Liste des derniers pointages
+                ScrollView:
                     size_hint_y: None
-                    height: 25
+                    height: 150 if root.recent_attendance_text and root.recent_attendance_text != 'Aucun pointage récent' else 25
+                    
+                    Label:
+                        text: root.recent_attendance_text
+                        font_name: 'Arial'
+                        font_size: 12
+                        color: 0.12, 0.23, 0.37, 1  # UCC_BLUE_DARK
+                        size_hint_y: None
+                        height: self.texture_size[1]
+                        text_size: self.width, None
+                        valign: 'top'
 ''')
 
 class DashboardScreen(Screen):
@@ -405,10 +415,18 @@ class DashboardScreen(Screen):
     absent_today = NumericProperty(0)
     attendance_rate = NumericProperty(0.0)
     current_date = StringProperty("")
+    recent_attendance = ListProperty([])
+    recent_attendance_text = StringProperty("Aucun pointage récent")
     
     def __init__(self, **kwargs):
         super(DashboardScreen, self).__init__(**kwargs)
-        self.db_service = DatabaseService()
+        self.db_service = MySQLService(
+            host='localhost',
+            database='ucc_face_recognition',
+            user='root',
+            password='admin123',
+            port=3306
+        )
         self.update_datetime()
         self.update_statistics()
     
@@ -422,12 +440,53 @@ class DashboardScreen(Screen):
         self.current_date = datetime.now().strftime("%d/%m/%Y")
     
     def update_statistics(self):
-        """Met à jour les statistiques du dashboard"""
+        """Met à jour les statistiques du dashboard avec les données réelles de MySQL"""
         try:
             stats = self.db_service.get_statistics()
             self.total_students = stats['total_students']
-            self.present_today = 0  # Pour l'instant, valeur par défaut
-            self.absent_today = self.total_students
-            self.attendance_rate = 0.0
+            
+            # Récupérer les statistiques de présence du jour depuis get_statistics
+            self.present_today = stats.get('attendance_today', 0)
+            
+            # Calculer les absents et le taux de présence
+            if self.total_students > 0:
+                self.absent_today = self.total_students - self.present_today
+                self.attendance_rate = (self.present_today / self.total_students) * 100
+            else:
+                self.absent_today = 0
+                self.attendance_rate = 0.0
+            
+            # Récupérer les derniers pointages
+            self.recent_attendance = self.db_service.get_recent_attendance(limit=5)
+            
+            # Générer le texte des derniers pointages
+            if self.recent_attendance:
+                attendance_text = "Derniers pointages:\n"
+                for i, attendance in enumerate(self.recent_attendance, 1):
+                    date_str = attendance['date_presence'].strftime("%H:%M") if hasattr(attendance['date_presence'], 'strftime') else str(attendance['date_presence'])
+                    attendance_text += f"{i}. {attendance['nom']} {attendance['prenom']} ({attendance['matricule']}) - {date_str} - {attendance['statut']}\n"
+                self.recent_attendance_text = attendance_text
+            else:
+                self.recent_attendance_text = "Aucun pointage récent"
+                
         except Exception as e:
             print(f"Erreur lors de la mise à jour des statistiques: {e}")
+            # Valeurs par défaut en cas d'erreur
+            self.total_students = 0
+            self.present_today = 0
+            self.absent_today = 0
+            self.attendance_rate = 0.0
+            self.recent_attendance = []
+            self.recent_attendance_text = "Aucun pointage récent"
+    
+    def go_to_students(self):
+        """Navigue vers l'écran des étudiants"""
+        self.manager.current = 'students'
+    
+    def go_to_attendance(self):
+        """Navigue vers l'écran de pointage"""
+        self.manager.current = 'attendance'
+    
+    def go_to_reports(self):
+        """Navigue vers l'écran des rapports"""
+        self.manager.current = 'reports'

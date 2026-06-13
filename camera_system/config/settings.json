@@ -1,0 +1,10 @@
+{
+    "threshold": 0.5,
+    "spoof_threshold": 0.85,
+    "camera_index": 0,
+    "resolution": "1280x720",
+    "session_duration": 60,
+    "cooldown": 3.0,
+    "anti_spoof_enabled": true,
+    "debug_mode": false
+}

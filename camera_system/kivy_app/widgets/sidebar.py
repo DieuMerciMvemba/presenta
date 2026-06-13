@@ -5,10 +5,16 @@ Menu latéral de navigation avec les options principales - Design Professionnel
 
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
-from kivy.properties import StringProperty, ObjectProperty
+from kivy.properties import StringProperty, ObjectProperty, NumericProperty
 from kivy.graphics import Color, Rectangle, Line
 from kivy.lang import Builder
+from kivy.clock import Clock
 from .ucc_button import UCCButton
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from services.mysql_service import MySQLService
 
 
 Builder.load_string('''
@@ -72,52 +78,65 @@ Builder.load_string('''
                 pos: self.pos
     
     # Menu items
-    BoxLayout:
-        orientation: 'vertical'
-        spacing: 2
-        padding: 10
+    ScrollView:
+        size_hint_y: None
+        height: 350  # Hauteur fixe pour le menu
         
-        UCCButton:
-            text: '🏠 Tableau de bord'
-            btn_color: [0.29, 0.56, 0.89, 1.0]  # ACCENT_BLUE
+        BoxLayout:
+            orientation: 'vertical'
+            spacing: 2
+            padding: 10
             size_hint_y: None
-            height: 48
-            on_release: root.go_to_dashboard()
+            height: self.minimum_height
             
-        UCCButton:
-            text: '👥 Gestion Étudiants'
-            btn_color: [0.16, 0.65, 0.27, 1.0]  # ACCENT_GREEN
-            size_hint_y: None
-            height: 48
-            on_release: root.go_to_students()
-            
-        UCCButton:
-            text: '📸 Pointage Caméra'
-            btn_color: [1.0, 0.76, 0.03, 1.0]  # ACCENT_YELLOW
-            size_hint_y: None
-            height: 48
-            on_release: root.go_to_attendance()
-            
-        UCCButton:
-            text: '🏛️ Organisation'
-            btn_color: [0.09, 0.64, 0.72, 1.0]  # ACCENT_CYAN
-            size_hint_y: None
-            height: 48
-            on_release: root.go_to_organization()
-            
-        UCCButton:
-            text: '📊 Rapports'
-            btn_color: [0.43, 0.26, 0.76, 1.0]  # ACCENT_PURPLE
-            size_hint_y: None
-            height: 48
-            on_release: root.go_to_reports()
-            
-        UCCButton:
-            text: '⚙️ Paramètres'
-            btn_color: [0.42, 0.46, 0.49, 1.0]  # BUTTON_SECONDARY
-            size_hint_y: None
-            height: 48
-            on_release: root.go_to_settings()
+            UCCButton:
+                text: '🏠 Tableau de bord'
+                btn_color: [0.29, 0.56, 0.89, 1.0]  # ACCENT_BLUE
+                size_hint_y: None
+                height: 48
+                on_release: root.go_to_dashboard()
+                
+            UCCButton:
+                text: '👥 Gestion Étudiants'
+                btn_color: [0.16, 0.65, 0.27, 1.0]  # ACCENT_GREEN
+                size_hint_y: None
+                height: 48
+                on_release: root.go_to_students()
+                
+            UCCButton:
+                text: '🎓 Enrôlement'
+                btn_color: [0.99, 0.65, 0.0, 1.0]  # ACCENT_ORANGE
+                size_hint_y: None
+                height: 48
+                on_release: root.go_to_enrollment()
+                
+            UCCButton:
+                text: '📸 Pointage Caméra'
+                btn_color: [1.0, 0.76, 0.03, 1.0]  # ACCENT_YELLOW
+                size_hint_y: None
+                height: 48
+                on_release: root.go_to_attendance()
+                
+            UCCButton:
+                text: '🏛️ Organisation'
+                btn_color: [0.09, 0.64, 0.72, 1.0]  # ACCENT_CYAN
+                size_hint_y: None
+                height: 48
+                on_release: root.go_to_organization()
+                
+            UCCButton:
+                text: '📊 Rapports'
+                btn_color: [0.43, 0.26, 0.76, 1.0]  # ACCENT_PURPLE
+                size_hint_y: None
+                height: 48
+                on_release: root.go_to_reports()
+                
+            UCCButton:
+                text: '⚙️ Paramètres'
+                btn_color: [0.42, 0.46, 0.49, 1.0]  # BUTTON_SECONDARY
+                size_hint_y: None
+                height: 48
+                on_release: root.go_to_settings()
     
     # Espaceur
     BoxLayout:
@@ -249,11 +268,29 @@ class Sidebar(BoxLayout):
     """Widget Sidebar avec navigation UCC - Design Professionnel"""
     
     screen_manager = ObjectProperty(None)
-    student_count = 0
-    present_count = 0
+    student_count = NumericProperty(0)
+    present_count = NumericProperty(0)
     
     def __init__(self, **kwargs):
         super(Sidebar, self).__init__(**kwargs)
+        
+        # Initialiser MySQLService
+        try:
+            self.db_service = MySQLService(
+                host='localhost',
+                database='ucc_face_recognition',
+                user='root',
+                password='admin123',
+                port=3306
+            )
+            print("✅ MySQLService initialisé dans Sidebar")
+            # Charger les statistiques initiales
+            Clock.schedule_once(self.update_statistics, 1)
+            # Mettre à jour les statistiques périodiquement
+            Clock.schedule_interval(self.update_statistics, 30)  # Toutes les 30 secondes
+        except Exception as e:
+            print(f"❌ Erreur lors de l'initialisation de MySQLService dans Sidebar: {e}")
+            self.db_service = None
     
     def go_to_dashboard(self):
         """Navigue vers le tableau de bord"""
@@ -264,6 +301,11 @@ class Sidebar(BoxLayout):
         """Navigue vers la gestion des étudiants"""
         if self.screen_manager:
             self.screen_manager.current = 'students'
+    
+    def go_to_enrollment(self):
+        """Navigue vers l'enrôlement des étudiants"""
+        if self.screen_manager:
+            self.screen_manager.current = 'enrollment'
     
     def go_to_attendance(self):
         """Navigue vers le pointage caméra"""
@@ -291,7 +333,15 @@ class Sidebar(BoxLayout):
             # Pour l'instant, on affiche un message
             print("Déconnexion...")
     
-    def update_statistics(self, student_count, present_count):
-        """Met à jour les statistiques affichées"""
-        self.student_count = student_count
-        self.present_count = present_count
+    def update_statistics(self, dt=None):
+        """Met à jour les statistiques du sidebar depuis MySQL"""
+        if not self.db_service:
+            return
+        
+        try:
+            stats = self.db_service.get_statistics()
+            self.student_count = stats.get('total_students', 0)
+            self.present_count = stats.get('attendance_today', 0)
+            print(f"📊 Statistiques sidebar mises à jour: {self.student_count} étudiants, {self.present_count} présents")
+        except Exception as e:
+            print(f"❌ Erreur lors de la mise à jour des statistiques du sidebar: {e}")

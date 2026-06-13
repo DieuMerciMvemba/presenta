@@ -14,6 +14,8 @@ from kivy.uix.switch import Switch
 from kivy.graphics import Color, Rectangle
 from kivy.properties import NumericProperty, BooleanProperty, StringProperty
 from kivy.lang import Builder
+import json
+import os
 
 Builder.load_string('''
 <SettingsScreen>:
@@ -51,6 +53,7 @@ Builder.load_string('''
                 size_hint_x: 0.3
                 font_name: 'Arial'
                 font_size: 12
+                on_release: root.save_settings()
         
         # Contenu principal
         BoxLayout:
@@ -398,8 +401,65 @@ class SettingsScreen(Screen):
     
     def __init__(self, **kwargs):
         super(SettingsScreen, self).__init__(**kwargs)
+        self.settings_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config', 'settings.json')
+        self.load_settings()
+    
+    def on_enter(self):
+        """Appelé lorsque l'écran est affiché"""
+        self.load_settings()
     
     def save_settings(self):
-        """Sauvegarde les paramètres"""
-        print("Sauvegarde des paramètres...")
+        """Sauvegarde les paramètres dans un fichier JSON"""
+        try:
+            settings = {
+                'threshold': self.threshold,
+                'spoof_threshold': self.spoof_threshold,
+                'camera_index': self.camera_index,
+                'resolution': self.resolution,
+                'session_duration': self.session_duration,
+                'cooldown': self.cooldown,
+                'anti_spoof_enabled': self.anti_spoof_enabled,
+                'debug_mode': self.debug_mode
+            }
+            
+            # Créer le dossier config s'il n'existe pas
+            config_dir = os.path.dirname(self.settings_file)
+            if not os.path.exists(config_dir):
+                os.makedirs(config_dir)
+            
+            # Sauvegarder les paramètres
+            with open(self.settings_file, 'w') as f:
+                json.dump(settings, f, indent=4)
+            
+            print(f"✅ Paramètres sauvegardés dans {self.settings_file}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de la sauvegarde des paramètres: {e}")
+            return False
+    
+    def load_settings(self):
+        """Charge les paramètres depuis un fichier JSON"""
+        try:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r') as f:
+                    settings = json.load(f)
+                
+                # Appliquer les paramètres chargés
+                self.threshold = settings.get('threshold', 0.5)
+                self.spoof_threshold = settings.get('spoof_threshold', 0.85)
+                self.camera_index = settings.get('camera_index', 0)
+                self.resolution = settings.get('resolution', "1280x720")
+                self.session_duration = settings.get('session_duration', 60)
+                self.cooldown = settings.get('cooldown', 3.0)
+                self.anti_spoof_enabled = settings.get('anti_spoof_enabled', True)
+                self.debug_mode = settings.get('debug_mode', False)
+                
+                print(f"✅ Paramètres chargés depuis {self.settings_file}")
+            else:
+                print(f"ℹ️ Fichier de paramètres non trouvé, utilisation des valeurs par défaut")
+                
+        except Exception as e:
+            print(f"❌ Erreur lors du chargement des paramètres: {e}")
+            print(f"ℹ️ Utilisation des valeurs par défaut")
         # Cette fonction sera implémentée pour sauvegarder dans un fichier de configuration

@@ -27,3 +27,4 @@ openpyxl>=3.0.9
 insightface 
 onnxruntime
 faiss-cpu
+mysql-connector-python
