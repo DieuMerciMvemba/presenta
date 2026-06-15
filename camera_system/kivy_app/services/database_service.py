@@ -17,7 +17,7 @@ class DatabaseService:
     """Service pour la gestion de la base de données MySQL"""
     
     def __init__(self, host='localhost', database='ucc_face_recognition', 
-                 user='root', password='', port=3306):
+                 user='root', password='admin123', port=3306):
         """
         Initialise le service de base de données
         
@@ -65,8 +65,7 @@ class DatabaseService:
                     'email': student.get('email', ''),
                     'telephone': student.get('telephone', ''),
                     'faculte_id': student.get('faculte_id'),
-                    'departement_id': student.get('departement_id'),
-                    'annee_etude': student.get('annee_etude')
+                    'promotion_id': student.get('promotion_id')
                 }
                 formatted_students.append(student_info)
             return formatted_students
@@ -117,6 +116,26 @@ class DatabaseService:
             logger.error(f"Erreur lors de la mise à jour: {e}")
             return False
     
+    def update_student(self, student_id: int, matricule: str = None, 
+                      nom: str = None, prenom: str = None, 
+                      email: str = None, telephone: str = None,
+                      faculte_id: int = None, promotion_id: int = None):
+        """Met à jour les informations d'un étudiant (méthode complète)"""
+        try:
+            return self.mysql_service.update_student(
+                student_id,
+                matricule=matricule,
+                nom=nom,
+                prenom=prenom,
+                email=email,
+                telephone=telephone,
+                faculte_id=faculte_id,
+                promotion_id=promotion_id
+            )
+        except Exception as e:
+            logger.error(f"Erreur lors de la mise à jour complète: {e}")
+            return False
+    
     def delete_student(self, student_id):
         """Supprime un étudiant de la base de données"""
         try:
@@ -126,7 +145,7 @@ class DatabaseService:
             return False
     
     def add_student(self, matricule, nom, prenom, email=None, telephone=None, 
-                   faculte_id=None, departement_id=None, annee_etude=None):
+                   faculte_id=None, promotion_id=None):
         """Ajoute un nouvel étudiant"""
         try:
             student_id = self.mysql_service.insert_student(
@@ -136,13 +155,69 @@ class DatabaseService:
                 email=email,
                 telephone=telephone,
                 faculte_id=faculte_id,
-                departement_id=departement_id,
-                annee_etude=annee_etude
+                promotion_id=promotion_id
             )
             return student_id
         except Exception as e:
             logger.error(f"Erreur lors de l'ajout de l'étudiant: {e}")
             return None
+    
+    def get_all_faculties(self):
+        """Retourne toutes les facultés"""
+        try:
+            return self.mysql_service.get_all_faculties()
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des facultés: {e}")
+            return []
+    
+    def get_all_promotions(self):
+        """Retourne toutes les promotions"""
+        try:
+            return self.mysql_service.get_all_promotions()
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération des promotions: {e}")
+            return []
+    
+    def add_promotion(self, nom, code, description=None):
+        """Ajoute une nouvelle promotion"""
+        try:
+            promotion_id = self.mysql_service.insert_promotion(nom, code, description)
+            return promotion_id
+        except Exception as e:
+            logger.error(f"Erreur lors de l'ajout de la promotion: {e}")
+            return None
+    
+    def get_daily_report(self, date=None):
+        """Génère le rapport journalier"""
+        try:
+            return self.mysql_service.get_daily_report(date)
+        except Exception as e:
+            logger.error(f"Erreur lors de la génération du rapport journalier: {e}")
+            return {}
+    
+    def get_faculty_report(self, faculty_id=None):
+        """Génère le rapport par faculté"""
+        try:
+            return self.mysql_service.get_faculty_report(faculty_id)
+        except Exception as e:
+            logger.error(f"Erreur lors de la génération du rapport par faculté: {e}")
+            return {}
+    
+    def get_promotion_report(self, promotion_id=None):
+        """Génère le rapport par promotion"""
+        try:
+            return self.mysql_service.get_promotion_report(promotion_id)
+        except Exception as e:
+            logger.error(f"Erreur lors de la génération du rapport par promotion: {e}")
+            return {}
+    
+    def get_student_attendance_history(self, student_id, limit=30):
+        """Récupère l'historique de présence d'un étudiant"""
+        try:
+            return self.mysql_service.get_student_attendance_history(student_id, limit)
+        except Exception as e:
+            logger.error(f"Erreur lors de la récupération de l'historique: {e}")
+            return []
     
     def get_statistics(self):
         """Retourne des statistiques sur la base de données"""
@@ -151,6 +226,12 @@ class DatabaseService:
             return {
                 'total_students': stats.get('total_students', 0),
                 'total_photos': 0,  # À implémenter avec une table séparée pour les photos
+                'total_attendance': stats.get('total_attendance', 0),
+                'total_faculties': stats.get('total_faculties', 0),
+                'total_promotions': stats.get('total_promotions', 0),
+                'attendance_today': stats.get('attendance_today', 0),
+                'present_today': stats.get('present_today', 0),
+                'late_today': stats.get('late_today', 0),
                 'avg_photos_per_student': 0
             }
         except Exception as e:
@@ -158,6 +239,12 @@ class DatabaseService:
             return {
                 'total_students': 0,
                 'total_photos': 0,
+                'total_attendance': 0,
+                'total_faculties': 0,
+                'total_promotions': 0,
+                'attendance_today': 0,
+                'present_today': 0,
+                'late_today': 0,
                 'avg_photos_per_student': 0
             }
     
@@ -179,6 +266,22 @@ class DatabaseService:
             return attendance_id
         except Exception as e:
             logger.error(f"Erreur lors de l'enregistrement de présence: {e}")
+            return None
+    
+    def get_student_attendance_today(self, student_id):
+        """
+        Vérifie si un étudiant a déjà été enregistré aujourd'hui (RÈGLE 4: Anti-doublon)
+        
+        Args:
+            student_id: ID de l'étudiant
+            
+        Returns:
+            Dictionnaire avec les informations de présence si trouvé, None sinon
+        """
+        try:
+            return self.mysql_service.get_student_attendance_today(student_id)
+        except Exception as e:
+            logger.error(f"Erreur lors de la vérification de présence aujourd'hui: {e}")
             return None
     
     def disconnect(self):

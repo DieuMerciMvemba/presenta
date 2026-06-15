@@ -10,6 +10,16 @@ import numpy as np
 import faiss
 import os
 import logging
+import sys
+
+# Importer la configuration
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from config import Config
+except ImportError:
+    # Fallback si config n'est pas disponible
+    class Config:
+        DATA_PATH = "data"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,15 +33,21 @@ class LocalVectorDB:
     Photo d'identité ➔ MTCNN ➔ Alignement ➔ ArcFace ➔ Stockage dans le fichier FAISS (.index + .pkl)
     """
     
-    def __init__(self, index_path="data/facerec_faiss.index", metadata_path="data/students_metadata.pkl", dimension=512):
+    def __init__(self, index_path=None, metadata_path=None, dimension=512):
         """
         Initialise ou charge une base de données FAISS existante.
         
         Args:
-            index_path (str): Chemin vers le fichier d'index FAISS
-            metadata_path (str): Chemin vers le fichier de métadonnées pickle
+            index_path (str): Chemin vers le fichier d'index FAISS (utilise Config.DATA_PATH par défaut)
+            metadata_path (str): Chemin vers le fichier de métadonnées pickle (utilise Config.DATA_PATH par défaut)
             dimension (int): Dimension des embeddings (512 pour ArcFace)
-        """
+        """ 
+        # Utiliser Config.DATA_PATH si les chemins ne sont pas fournis
+        if index_path is None:
+            index_path = os.path.join(Config.DATA_PATH, "facerec_faiss.index")
+        if metadata_path is None:
+            metadata_path = os.path.join(Config.DATA_PATH, "students_metadata.pkl")
+        
         self.index_path = index_path
         self.metadata_path = metadata_path
         self.dimension = dimension

@@ -49,10 +49,19 @@ class RealtimeFaceDetector:
         self.display_size = display_size
         self.spoof_threshold = spoof_threshold
         
-        # Initialiser la base de données dans le sous-dossier dédié 'data'
+        # Initialiser la base de données dans le sous-dossier dédié 'data' (chemin absolu)
         logger.info("Chargement de la base de données...")
-        os.makedirs("data", exist_ok=True)
-        self.db = LocalVectorDB(index_path="data/facerec_faiss.index", metadata_path="data/students_metadata.pkl")
+        try:
+            from config import Config
+            data_path = Config.DATA_PATH
+        except ImportError:
+            # Fallback: chemin absolu basé sur l'emplacement de ce script
+            data_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+        os.makedirs(data_path, exist_ok=True)
+        self.db = LocalVectorDB(
+            index_path=os.path.join(data_path, "facerec_faiss.index"),
+            metadata_path=os.path.join(data_path, "students_metadata.pkl")
+        )
         logger.info(f"Base de données chargée: {self.db.get_student_count()} étudiants")
         
         # Initialiser le pipeline de reconnaissance

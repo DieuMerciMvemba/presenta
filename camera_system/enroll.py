@@ -14,11 +14,20 @@ import logging
 from vector_db import LocalVectorDB
 from pipeline import FacePipeline
 
+# Import pour la sauvegarde MySQL
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from kivy_app.services.mysql_service import MySQLService
+    MYSQL_AVAILABLE = True
+except ImportError:
+    MYSQL_AVAILABLE = False
+    logger.warning("MySQL non disponible, seule la sauvegarde FAISS sera effectuée")
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
-def enroll_student(matricule, nom, prenom, photo_paths):
+def enroll_student(matricule, nom, prenom, photo_paths, email=None, telephone=None, faculte_id=None, promotion_id=None):
     """
     Inscrit un nouvel étudiant dans le système avec support multi-photos.
     
@@ -29,6 +38,10 @@ def enroll_student(matricule, nom, prenom, photo_paths):
         nom (str): Nom de l'étudiant
         prenom (str): Prénom de l'étudiant
         photo_paths (str or list): Chemin vers la photo (single) ou liste de chemins (multi)
+        email (str): Email de l'étudiant (optionnel)
+        telephone (str): Téléphone de l'étudiant (optionnel)
+        faculte_id (int): ID de la faculté (optionnel)
+        promotion_id (int): ID de la promotion (optionnel)
     """
     logger.info("=" * 70)
     logger.info("PHASE D'ENRÔLEMENT D'ÉTUDIANT - UCC")
@@ -87,6 +100,44 @@ def enroll_student(matricule, nom, prenom, photo_paths):
         logger.info(f"Photos utilisées: {len(embeddings)}")
         logger.info(f"Total étudiants: {db.get_student_count()}")
         logger.info("=" * 70)
+        
+        # Sauvegarde MySQL si les paramètres sont fournis
+        if MYSQL_AVAILABLE and (faculte_id is not None or promotion_id is not None):
+            logger.info("ÉTAPE 5: Sauvegarde dans MySQL...")
+            try:
+                mysql_service = MySQLService(
+                    host='localhost',
+                    database='ucc_face_recognition',
+                    user='root',
+                    password='admin123',
+                    port=3306
+                )
+                
+                if mysql_service.connect():
+                    mysql_student_id = mysql_service.insert_student(
+                        matricule=matricule,
+                        nom=nom,
+                        prenom=prenom,
+                        email=email,
+                        telephone=telephone,
+                        faculte_id=faculte_id,
+                        promotion_id=promotion_id
+                    )
+                    
+                    if mysql_student_id:
+                        logger.info(f"✅ Étudiant sauvegardé dans MySQL (ID: {mysql_student_id})")
+                    else:
+                        logger.warning("⚠️ Étudiant existe déjà dans MySQL")
+                    
+                    mysql_service.disconnect()
+                else:
+                    logger.warning("⚠️ Impossible de se connecter à MySQL")
+                    
+            except Exception as e:
+                logger.error(f"❌ Erreur lors de la sauvegarde MySQL: {e}")
+        elif MYSQL_AVAILABLE:
+            logger.info("⚠️ Sauvegarde MySQL ignorée: faculte_id et promotion_id non fournis")
+            logger.info("💡 Pour sauvegarder dans MySQL, utilisez --faculte-id et --promotion-id")
         
     except ValueError as e:
         logger.error(f"Erreur de validation: {e}")
@@ -401,6 +452,10 @@ Exemples d'utilisation:
     enroll_parser.add_argument('--matricule', required=True, help='Matricule de l\'étudiant')
     enroll_parser.add_argument('--nom', required=True, help='Nom de l\'étudiant')
     enroll_parser.add_argument('--prenom', required=True, help='Prénom de l\'étudiant')
+    enroll_parser.add_argument('--email', help='Email de l\'étudiant (optionnel)')
+    enroll_parser.add_argument('--telephone', help='Téléphone de l\'étudiant (optionnel)')
+    enroll_parser.add_argument('--faculte-id', type=int, help='ID de la faculté (optionnel, requis pour sauvegarde MySQL)')
+    enroll_parser.add_argument('--promotion-id', type=int, help='ID de la promotion (optionnel, requis pour sauvegarde MySQL)')
     enroll_parser.add_argument('--photos', nargs='+', required=True, 
                               help='Chemin(s) vers la/les photo(s) d\'identité (5-10 photos recommandées)')
     enroll_parser.add_argument('--photo', help='Chemin vers une photo d\'identité unique (compatibilité)')
@@ -442,7 +497,16 @@ Exemples d'utilisation:
             logger.error("Erreur: Veuillez spécifier au moins une photo avec --photos ou --photo")
             sys.exit(1)
         
-        enroll_student(args.matricule, args.nom, args.prenom, photo_paths)
+        enroll_student(
+            args.matricule, 
+            args.nom, 
+            args.prenom, 
+            photo_paths,
+            email=getattr(args, 'email', None),
+            telephone=getattr(args, 'telephone', None),
+            faculte_id=getattr(args, 'faculte_id', None),
+            promotion_id=getattr(args, 'promotion_id', None)
+        )
     elif args.command == 'attendance':
         check_attendance(args.photo, args.threshold)
     elif args.command == 'update':

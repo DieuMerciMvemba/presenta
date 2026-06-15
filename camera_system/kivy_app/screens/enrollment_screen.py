@@ -31,6 +31,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from enroll import enroll_student
 from vector_db import LocalVectorDB
 
+# Importer la configuration
+from config import Config, UCC_FACULTIES, UCC_PROMOTIONS
+
 Builder.load_string('''
 <EnrollmentScreen>:
     name: 'enrollment'
@@ -198,6 +201,38 @@ Builder.load_string('''
                         size_hint_y: None
                         height: 40
                     
+                    # Faculté
+                    Label:
+                        text: 'Faculté:'
+                        font_name: 'Arial'
+                        font_size: 12
+                        color: 0.2, 0.2, 0.2, 1
+                        size_hint_y: None
+                        height: 25
+                    Spinner:
+                        id: faculte_spinner
+                        text: 'Sélectionner une faculté'
+                        font_name: 'Arial'
+                        font_size: 12
+                        size_hint_y: None
+                        height: 40
+                    
+                    # Promotion
+                    Label:
+                        text: 'Promotion:'
+                        font_name: 'Arial'
+                        font_size: 12
+                        color: 0.2, 0.2, 0.2, 1
+                        size_hint_y: None
+                        height: 25
+                    Spinner:
+                        id: promotion_spinner
+                        text: 'Sélectionner une promotion'
+                        font_name: 'Arial'
+                        font_size: 12
+                        size_hint_y: None
+                        height: 40
+                    
                     # Photos
                     Label:
                         text: '📷 Photos d\\'identité (5-10 recommandées):'
@@ -346,23 +381,42 @@ class EnrollmentScreen(Screen):
             port=3306
         )
         
-        # Changer le répertoire de travail pour accéder aux modules
-        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # Ne pas changer le répertoire de travail pour éviter les problèmes de chemins relatifs
     
     def on_enter(self):
         """Appelé lorsque l'écran est affiché"""
         self.log_message("🎓 Écran d'Enrôlement initialisé", "header")
         self.log_message("Pipeline: Photos ➔ MTCNN ➔ Alignement ➔ ArcFace ➔ Stockage FAISS + MySQL", "info")
+        
+        # Charger les facultés et promotions depuis MySQL
+        self.load_faculties_and_promotions()
+    
+    def load_faculties_and_promotions(self):
+        """Charge les facultés et promotions depuis la configuration dans les spinners"""
+        try:
+            # Charger les facultés depuis la configuration
+            self.ids.faculte_spinner.values = UCC_FACULTIES
+            self.log_message(f"✅ {len(UCC_FACULTIES)} faculté(s) chargée(s) depuis la configuration", "info")
+            
+            # Charger les promotions depuis la configuration
+            self.ids.promotion_spinner.values = UCC_PROMOTIONS
+            self.log_message(f"✅ {len(UCC_PROMOTIONS)} promotion(s) chargée(s) depuis la configuration", "info")
+                
+        except Exception as e:
+            self.log_message(f"❌ Erreur lors du chargement des données: {e}", "error")
     
     def select_photos(self):
         """Ouvre un sélecteur de fichiers pour choisir les photos"""
         content = BoxLayout(orientation='vertical', padding=20, spacing=10)
         
         # FileChooser avec sélection multiple activée
-        # Utiliser le répertoire courant si Dataset n'existe pas
-        dataset_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'Dataset')
+        # Utiliser le répertoire Dataset depuis la configuration
+        dataset_path = Config.DATASET_PATH
         if not os.path.exists(dataset_path):
-            dataset_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            dataset_path = Config.PROJECT_ROOT
+        
+        self.log_message(f"📁 FileChooser - Dataset path (Config): {dataset_path}", "info")
+        self.log_message(f"📁 FileChooser - Dataset exists: {os.path.exists(dataset_path)}", "info")
         
         filechooser = FileChooserListView(
             path=dataset_path,
@@ -415,8 +469,8 @@ class EnrollmentScreen(Screen):
         self.photo_paths = []
         self.ids.photo_count_label.text = '0 photo(s) sélectionnée(s)'
         
-        # Vider les logs
-        self.ids.log_container.clear_widgets()
+        # NE PAS vider les logs automatiquement - l'admin le fera seul
+        # self.ids.log_container.clear_widgets()
         
         self.log_message("Formulaire réinitialisé", "warning")
     
@@ -465,74 +519,134 @@ class EnrollmentScreen(Screen):
         prenom = self.ids.prenom_input.text.strip()
         email = self.ids.email_input.text.strip() or None
         telephone = self.ids.telephone_input.text.strip() or None
+        
+        # Récupérer les IDs depuis les spinners
+        faculte_name = self.ids.faculte_spinner.text
+        promotion_name = self.ids.promotion_spinner.text
+        faculte_id = self.get_faculty_id_by_name(faculte_name)
+        promotion_id = self.get_promotion_id_by_name(promotion_name)
+        
+        # Validation des IDs
+        if faculte_id is None:
+            self.log_message("❌ Veuillez sélectionner une faculté", "error")
+            return
+        
+        if promotion_id is None:
+            self.log_message("❌ Veuillez sélectionner une promotion", "error")
+            return
+        
         photo_paths = self.photo_paths
         
         self.is_processing = True
         self.log_message(f"Début de l'enrôlement pour {prenom} {nom}...", "header")
         self.log_message(f"Nombre de photos: {len(photo_paths)}", "info")
+        self.log_message(f"Faculté: {faculte_name} (ID: {faculte_id})", "info")
+        self.log_message(f"Promotion: {promotion_name} (ID: {promotion_id})", "info")
         
         # Exécuter dans un thread séparé pour ne pas bloquer l'interface
         thread = threading.Thread(
             target=self.execute_enrollment,
-            args=(matricule, nom, prenom, email, telephone, photo_paths)
+            args=(matricule, nom, prenom, email, telephone, faculte_id, promotion_id, photo_paths)
         )
         thread.daemon = True
         thread.start()
     
-    def execute_enrollment(self, matricule, nom, prenom, email, telephone, photo_paths):
+    def get_faculty_id_by_name(self, faculty_name):
+        """Récupère l'ID de la faculté par son nom depuis la configuration"""
+        if faculty_name == "Sélectionner une faculté":
+            return None
+        try:
+            # Utiliser l'index + 1 comme ID (basé sur la configuration)
+            if faculty_name in UCC_FACULTIES:
+                return UCC_FACULTIES.index(faculty_name) + 1
+        except Exception as e:
+            self.log_message(f"❌ Erreur lors de la récupération de l'ID de faculté: {e}", "error")
+        return None
+    
+    def get_promotion_id_by_name(self, promotion_name):
+        """Récupère l'ID de la promotion par son nom depuis la configuration"""
+        if promotion_name == "Sélectionner une promotion":
+            return None
+        try:
+            # Utiliser l'index + 1 comme ID (basé sur la configuration)
+            if promotion_name in UCC_PROMOTIONS:
+                return UCC_PROMOTIONS.index(promotion_name) + 1
+        except Exception as e:
+            self.log_message(f"❌ Erreur lors de la récupération de l'ID de promotion: {e}", "error")
+        return None
+    
+    def execute_enrollment(self, matricule, nom, prenom, email, telephone, faculte_id, promotion_id, photo_paths):
         """Exécute l'enrôlement via subprocess comme dans enrollment_gui.py"""
         try:
-            # Chemin du projet (racine du dossier camera_system)
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            # Utiliser les chemins depuis la configuration
+            project_root = Config.PROJECT_ROOT
+            enroll_script = Config.get_enroll_script_path()
+            python_exe = Config.get_python_executable()
             
-            # Chemin relatif du script enroll.py depuis le projet
-            enroll_script = os.path.join(project_root, "enroll.py")
+            self.log_message(f"📁 Répertoire de travail actuel: {os.getcwd()}", "info")
+            self.log_message(f"📁 Racine du projet (Config): {project_root}", "info")
+            self.log_message(f"📁 Script enroll.py: {enroll_script}", "info")
+            self.log_message(f"📁 Vérification existence enroll.py: {os.path.exists(enroll_script)}", "info")
+            self.log_message(f"🐍 Python utilisé: {python_exe}", "info")
             
-            # Construire la commande avec "python" et chemins relatifs
+            # Construire la commande avec le Python détecté
             command = [
-                "python",
+                python_exe,
                 enroll_script,
                 "enroll",
                 "--matricule", matricule,
                 "--nom", nom,
                 "--prenom", prenom,
-                "--photos"
+                "--faculte-id", str(faculte_id),
+                "--promotion-id", str(promotion_id)
             ]
             
-            # Convertir les chemins des photos en relatifs si possible
-            relative_photo_paths = []
-            for photo_path in photo_paths:
-                try:
-                    # Essayer de convertir en chemin relatif depuis le projet
-                    rel_path = os.path.relpath(photo_path, project_root)
-                    relative_photo_paths.append(rel_path)
-                except ValueError:
-                    # Si impossible (disques différents), garder le chemin absolu
-                    relative_photo_paths.append(photo_path)
+            # Ajouter email et téléphone si disponibles (AVANT --photos)
+            if email:
+                command.extend(["--email", email])
+            if telephone:
+                command.extend(["--telephone", telephone])
             
-            command.extend(relative_photo_paths)
+            # Ajouter --photos après les autres options
+            command.append("--photos")
+            
+            # Utiliser des chemins absolus pour éviter les erreurs de résolution
+            absolute_photo_paths = []
+            for photo_path in photo_paths:
+                self.log_message(f"📷 Photo originale: {photo_path}", "info")
+                self.log_message(f"📷 Existe: {os.path.exists(photo_path)}", "info")
+                # Convertir en chemin absolu
+                abs_path = os.path.abspath(photo_path)
+                absolute_photo_paths.append(abs_path)
+                self.log_message(f"📷 Photo absolue: {abs_path}", "info")
+            
+            command.extend(absolute_photo_paths)
             
             # Afficher la commande exacte dans l'interface UI
             command_str = ' '.join(command)
             self.ids.command_display.text = command_str
             
             # Afficher la commande exacte dans les logs comme dans enrollment_gui.py
-            self.log_message(f"Commande: {command_str}", "info")
+            self.log_message(f"🔧 Commande complète: {command_str}", "info")
             
             # ÉTAPE 1: Enrôlement via subprocess
             self.log_message("ÉTAPE 1: Traitement des images (MTCNN ➔ Alignement ➔ ArcFace)...", "info")
+            self.log_message("🔧 Démarrage du subprocess...", "info")
             
             # Exécuter la commande avec subprocess
             import subprocess
             process = subprocess.Popen(
                 command,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Combiner stderr dans stdout pour voir tous les logs
                 text=True,
                 bufsize=1,
                 universal_newlines=True,
-                cwd=script_dir
+                cwd=project_root,
+                env=os.environ.copy()  # Utiliser l'environnement actuel
             )
+            
+            self.log_message(f"🔧 Processus démarré (PID: {process.pid})", "info")
             
             # Lire la sortie en temps réel
             while True:
@@ -540,10 +654,18 @@ class EnrollmentScreen(Screen):
                 if output == '' and process.poll() is not None:
                     break
                 if output:
-                    self.log_message(output.strip(), "info")
+                    # Afficher chaque ligne du log
+                    line = output.strip()
+                    if line:
+                        self.log_message(f"  {line}", "info")
             
             # Vérifier le code de retour
             return_code = process.poll()
+            self.log_message(f"🔧 Code de retour: {return_code}", "info")
+            
+            # Lire les erreurs s'il y en a
+            if return_code != 0:
+                self.log_message(f"❌ Erreur lors de l'exécution (code: {return_code})", "error")
             
             if return_code == 0:
                 self.log_message("✅ ÉTAPE 1: Enrôlement FAISS réussi !", "success")
@@ -567,7 +689,8 @@ class EnrollmentScreen(Screen):
                         prenom=prenom,
                         email=email,
                         telephone=telephone,
-                        num_photos=num_photos
+                        faculte_id=faculte_id,
+                        promotion_id=promotion_id
                     )
                     
                     if mysql_student_id:
@@ -586,19 +709,88 @@ class EnrollmentScreen(Screen):
                 self.log_message("Stockage: FAISS + MySQL", "info")
                 self.log_message("=" * 50, "header")
                 
+                # Afficher un popup de succès
+                Clock.schedule_once(lambda dt: self.show_success_popup(matricule, nom, prenom), 0.5)
+                
                 # Réinitialiser le formulaire après succès
                 Clock.schedule_once(lambda dt: self.reset_form(), 2)
             else:
                 error_output = process.stderr.read()
                 self.log_message(f"❌ Erreur lors de l'enrôlement: {error_output}", "error")
+                # Afficher un popup d'erreur
+                Clock.schedule_once(lambda dt: self.show_error_popup(str(error_output)), 0.5)
             
         except Exception as e:
             self.log_message(f"❌ Exception: {str(e)}", "error")
             import traceback
             self.log_message(f"Détails: {traceback.format_exc()}", "error")
+            # Afficher un popup d'erreur
+            Clock.schedule_once(lambda dt: self.show_error_popup(str(e)), 0.5)
         
         finally:
             self.is_processing = False
+    
+    def show_success_popup(self, matricule, nom, prenom):
+        """Affiche un popup de succès après l'enrôlement"""
+        content = BoxLayout(orientation='vertical', padding=20, spacing=10)
+        
+        label = Label(
+            text=f"✅ Enrôlement réussi !\n\nMatricule: {matricule}\nNom: {nom}\nPrénom: {prenom}",
+            font_size=16,
+            color=(0, 0.5, 0, 1),
+            halign='center'
+        )
+        content.add_widget(label)
+        
+        btn = Button(
+            text='OK',
+            size_hint_y=None,
+            height=40,
+            background_color=(0.16, 0.65, 0.26, 1.0),
+            color=(1, 1, 1, 1)
+        )
+        content.add_widget(btn)
+        
+        popup = Popup(
+            title='Succès',
+            content=content,
+            size_hint=(0.4, 0.3),
+            auto_dismiss=True
+        )
+        
+        btn.bind(on_release=popup.dismiss)
+        popup.open()
+    
+    def show_error_popup(self, error_message):
+        """Affiche un popup d'erreur après l'échec de l'enrôlement"""
+        content = BoxLayout(orientation='vertical', padding=20, spacing=10)
+        
+        label = Label(
+            text=f"❌ Erreur lors de l'enrôlement\n\n{error_message[:200]}...",
+            font_size=14,
+            color=(0.8, 0, 0, 1),
+            halign='center'
+        )
+        content.add_widget(label)
+        
+        btn = Button(
+            text='OK',
+            size_hint_y=None,
+            height=40,
+            background_color=(0.8, 0.2, 0.2, 1.0),
+            color=(1, 1, 1, 1)
+        )
+        content.add_widget(btn)
+        
+        popup = Popup(
+            title='Erreur',
+            content=content,
+            size_hint=(0.4, 0.3),
+            auto_dismiss=True
+        )
+        
+        btn.bind(on_release=popup.dismiss)
+        popup.open()
     
     def copy_command(self):
         """Copie la commande affichée dans le presse-papiers"""

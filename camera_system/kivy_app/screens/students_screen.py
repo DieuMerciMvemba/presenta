@@ -18,7 +18,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from services.mysql_service import MySQLService
+from services.database_service import DatabaseService
 
 Builder.load_string('''
 <StudentsScreen>:
@@ -181,7 +181,7 @@ Builder.load_string('''
                         font_size: 11
                         bold: True
                         color: 0.0, 0.2, 0.4, 1
-                        size_hint_x: 0.2
+                        size_hint_x: 0.3
                 
                 # Liste déroulante des étudiants
                 ScrollView:
@@ -224,7 +224,7 @@ class StudentsScreen(Screen):
     
     def __init__(self, **kwargs):
         super(StudentsScreen, self).__init__(**kwargs)
-        self.db_service = MySQLService(
+        self.db_service = DatabaseService(
             host='localhost',
             database='ucc_face_recognition',
             user='root',
@@ -305,8 +305,16 @@ class StudentsScreen(Screen):
             # Actions
             actions_layout = BoxLayout(
                 orientation='horizontal',
-                size_hint_x=0.2,
+                size_hint_x=0.3,
                 spacing=5
+            )
+            
+            history_btn = Button(
+                text='📅',
+                font_size=14,
+                background_color=(0.43, 0.26, 0.76, 1.0),
+                color=(1, 1, 1, 1),
+                size_hint_x=0.33
             )
             
             edit_btn = Button(
@@ -314,7 +322,7 @@ class StudentsScreen(Screen):
                 font_size=14,
                 background_color=(0.0, 0.5, 1.0, 1.0),
                 color=(1, 1, 1, 1),
-                size_hint_x=0.5
+                size_hint_x=0.33
             )
             
             delete_btn = Button(
@@ -322,11 +330,17 @@ class StudentsScreen(Screen):
                 font_size=14,
                 background_color=(0.86, 0.21, 0.27, 1.0),
                 color=(1, 1, 1, 1),
-                size_hint_x=0.5
+                size_hint_x=0.33
             )
             
+            actions_layout.add_widget(history_btn)
             actions_layout.add_widget(edit_btn)
             actions_layout.add_widget(delete_btn)
+            
+            # Connecter les boutons aux méthodes
+            history_btn.bind(on_release=lambda instance: self.show_student_history(student['id']))
+            edit_btn.bind(on_release=lambda instance: self.edit_student(student['id']))
+            delete_btn.bind(on_release=lambda instance: self.delete_student(student['id']))
             
             row.add_widget(matricule_label)
             row.add_widget(nom_label)
@@ -426,10 +440,13 @@ class StudentsScreen(Screen):
     def edit_student(self, student_id):
         """Affiche le popup d'édition d'étudiant"""
         # Récupérer les données de l'étudiant
-        student = self.db_service.get_student_by_id(student_id)
-        if not student:
+        student_data = self.db_service.find_student_by_id(student_id)
+        if not student_data:
             print("❌ Étudiant non trouvé")
             return
+        
+        # Accéder aux métadonnées de l'étudiant
+        student = student_data.get('metadata', student_data)
         
         content = BoxLayout(orientation='vertical', padding=20, spacing=10)
         
@@ -561,3 +578,141 @@ class StudentsScreen(Screen):
             print("🔄 Filtre réinitialisé")
         except Exception as e:
             print(f"❌ Erreur lors de la réinitialisation: {e}")
+    
+    def show_student_history(self, student_id):
+        """Affiche l'historique de présence d'un étudiant"""
+        try:
+            # Récupérer l'historique depuis la base de données
+            history = self.db_service.get_student_attendance_history(student_id)
+            
+            # Récupérer les informations de l'étudiant
+            student_data = None
+            for student in self.students:
+                if student['id'] == student_id:
+                    student_data = student
+                    break
+            
+            if not student_data:
+                print("❌ Étudiant non trouvé")
+                return
+            
+            # Créer le contenu du popup
+            content = BoxLayout(orientation='vertical', padding=20, spacing=10)
+            
+            # Informations de l'étudiant
+            info_label = Label(
+                text=f"📅 Historique: {student_data['nom']} {student_data['prenom']} ({student_data['matricule']})",
+                font_name='Arial',
+                font_size=14,
+                bold=True,
+                color=(0.12, 0.23, 0.37, 1),
+                size_hint_y=None,
+                height=30
+            )
+            content.add_widget(info_label)
+            
+            # Liste de l'historique
+            if history:
+                scroll = ScrollView(size_hint=(1, 1))
+                history_layout = BoxLayout(orientation='vertical', spacing=5, size_hint_y=None)
+                
+                for record in history:
+                    # Déterminer la couleur selon le statut
+                    if record['statut'] == 'present':
+                        status_color = (0.16, 0.65, 0.26, 1)  # Vert
+                        status_text = '✅ Présent'
+                    elif record['statut'] == 'absent':
+                        status_color = (0.86, 0.21, 0.27, 1)  # Rouge
+                        status_text = '❌ Absent'
+                    elif record['statut'] == 'retard':
+                        status_color = (0.93, 0.62, 0.13, 1)  # Orange
+                        status_text = '⏰ Retard'
+                    else:
+                        status_color = (0.42, 0.46, 0.49, 1)  # Gris
+                        status_text = record['statut']
+                    
+                    record_layout = BoxLayout(
+                        orientation='horizontal',
+                        size_hint_y=None,
+                        height=35,
+                        padding=10,
+                        spacing=10
+                    )
+                    
+                    # Fond alterné
+                    bg_color = (0.97, 0.97, 0.97, 1) if history.index(record) % 2 == 0 else (1, 1, 1, 1)
+                    with record_layout.canvas.before:
+                        Color(*bg_color)
+                        Rectangle(size=record_layout.size, pos=record_layout.pos)
+                    
+                    date_label = Label(
+                        text=record['date'],
+                        font_name='Arial',
+                        font_size=11,
+                        color=(0.2, 0.2, 0.2, 1),
+                        size_hint_x=0.4
+                    )
+                    
+                    status_label = Label(
+                        text=status_text,
+                        font_name='Arial',
+                        font_size=11,
+                        color=status_color,
+                        size_hint_x=0.3
+                    )
+                    
+                    method_label = Label(
+                        text=f"📷 {record['methode']}",
+                        font_name='Arial',
+                        font_size=10,
+                        color=(0.42, 0.46, 0.49, 1),
+                        size_hint_x=0.3
+                    )
+                    
+                    record_layout.add_widget(date_label)
+                    record_layout.add_widget(status_label)
+                    record_layout.add_widget(method_label)
+                    history_layout.add_widget(record_layout)
+                
+                history_layout.height = len(history) * 40
+                scroll.add_widget(history_layout)
+                content.add_widget(scroll)
+            else:
+                no_history_label = Label(
+                    text="Aucun historique de présence disponible",
+                    font_name='Arial',
+                    font_size=12,
+                    color=(0.42, 0.46, 0.49, 1),
+                    size_hint_y=None,
+                    height=40
+                )
+                content.add_widget(no_history_label)
+            
+            # Bouton de fermeture
+            close_btn = Button(
+                text='Fermer',
+                background_color=(0.42, 0.46, 0.49, 1.0),
+                color=(1, 1, 1, 1),
+                size_hint_y=None,
+                height=40,
+                font_name='Arial',
+                font_size=12
+            )
+            content.add_widget(close_btn)
+            
+            popup = Popup(
+                title='Historique de Présence',
+                content=content,
+                size_hint=(0.6, 0.7)
+            )
+            
+            def dismiss_popup(instance):
+                popup.dismiss()
+            
+            close_btn.bind(on_release=dismiss_popup)
+            popup.open()
+            
+            print(f"📅 Historique affiché pour étudiant {student_id}: {len(history)} enregistrements")
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de l'affichage de l'historique: {e}")

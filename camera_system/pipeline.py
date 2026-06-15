@@ -243,13 +243,28 @@ class FacePipeline:
         if len(aligned_face.shape) == 2:
             aligned_face = cv2.cvtColor(aligned_face, cv2.COLOR_GRAY2BGR)
         
-        # Extraire l'embedding
-        faces = self.embedder.get(aligned_face)
-        
-        if len(faces) == 0:
-            raise ValueError("Aucun visage détecté par InsightFace lors de l'extraction d'embedding.")
-        
-        embedding = faces[0].embedding
+        # Extraire l'embedding via le modèle de reconnaissance ArcFace directement
+        # (évite de relancer RetinaFace sur un crop 112x112 déjà aligné, ce qui échoue souvent)
+        if hasattr(self.embedder, 'models') and 'recognition' in self.embedder.models:
+            rec_model = self.embedder.models['recognition']
+            # ArcFaceONNX expose get_feat (pas get_embedding)
+            if hasattr(rec_model, 'get_feat'):
+                embedding = rec_model.get_feat(aligned_face)
+            elif hasattr(rec_model, 'get_embedding'):
+                embedding = rec_model.get_embedding(aligned_face)
+            else:
+                raise AttributeError(
+                    f"Le modèle de reconnaissance ({type(rec_model).__name__}) ne dispose "
+                    f"ni de 'get_feat' ni de 'get_embedding'. "
+                    f"Attributs disponibles: {[a for a in dir(rec_model) if not a.startswith('_')]}"
+                )
+            if embedding.ndim > 1:
+                embedding = embedding.flatten()
+        else:
+            faces = self.embedder.get(aligned_face)
+            if len(faces) == 0:
+                raise ValueError("Aucun visage détecté par InsightFace lors de l'extraction d'embedding.")
+            embedding = faces[0].embedding
         
         # Normalisation L2 de l'embedding
         norm = np.linalg.norm(embedding)

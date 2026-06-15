@@ -6,5 +6,11 @@
     "session_duration": 60,
     "cooldown": 3.0,
     "anti_spoof_enabled": true,
-    "debug_mode": false
+    "debug_mode": false,
+    "attendance_rules": {
+        "late_time_limit": "08:00",
+        "enable_auto_late_detection": true,
+        "enable_daily_duplicate_check": true,
+        "enable_auto_absence_calculation": true
+    }
 }

@@ -37,6 +37,8 @@ from widgets.ucc_button import UCCButton
 from widgets.header import Header
 from widgets.sidebar import Sidebar
 
+from services.mysql_service import MySQLService
+
 # =============================================================================
 # DESIGN SYSTEM UCC
 # =============================================================================
@@ -166,6 +168,30 @@ class UCCFaceRecognitionApp(App):
         print("=" * 70)
         print(f"Application Kivy démarrée avec succès")
         print(f"Fenêtre: {Window.size}")
+        print("=" * 70)
+        
+        # Initialisation automatique de la base de données MySQL
+        print("\n📋 Initialisation de la base de données MySQL...")
+        try:
+            mysql_service = MySQLService(
+                host='localhost',
+                database='ucc_face_recognition',
+                user='root',
+                password='admin123',
+                port=3306
+            )
+            
+            # Créer les tables si elles n'existent pas
+            if mysql_service.create_tables():
+                print("✅ Tables MySQL vérifiées/créées avec succès")
+            else:
+                print("⚠️ Erreur lors de la création des tables")
+            
+            mysql_service.disconnect()
+        except Exception as e:
+            print(f"⚠️ Erreur lors de l'initialisation MySQL: {e}")
+            print("⚠️ L'application continuera en mode hors-ligne")
+        
         print("=" * 70)
         print("Écrans disponibles:")
         print("  - dashboard: Tableau de bord")

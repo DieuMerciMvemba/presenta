@@ -17,7 +17,7 @@ class MySQLService:
     """Service pour la gestion de la base de données MySQL"""
     
     def __init__(self, host='localhost', database='ucc_face_recognition', 
-                 user='root', password='', port=3306):
+                 user='root', password='admin123', port=3306):
         """
         Initialise le service MySQL
         
@@ -113,26 +113,16 @@ class MySQLService:
                 return False
         
         try:
-            # Table des étudiants
-            students_table = """
-            CREATE TABLE IF NOT EXISTS students (
+            # Table des utilisateurs (admin)
+            users_table = """
+            CREATE TABLE IF NOT EXISTS users (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                matricule VARCHAR(50) UNIQUE NOT NULL,
-                nom VARCHAR(100) NOT NULL,
-                prenom VARCHAR(100) NOT NULL,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
                 email VARCHAR(100),
-                telephone VARCHAR(20),
-                faculte_id INT,
-                departement_id INT,
-                annee_etude INT,
-                photo_path VARCHAR(255),
-                embedding_path VARCHAR(255),
-                num_photos INT DEFAULT 0,
+                role ENUM('admin', 'user') DEFAULT 'admin',
                 date_creation DATETIME DEFAULT CURRENT_TIMESTAMP,
-                date_modification DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                INDEX idx_matricule (matricule),
-                INDEX idx_faculte (faculte_id),
-                INDEX idx_departement (departement_id)
+                INDEX idx_username (username)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
             
@@ -148,34 +138,39 @@ class MySQLService:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
             
-            # Table des départements
-            departments_table = """
-            CREATE TABLE IF NOT EXISTS departments (
+            # Table des promotions
+            promotions_table = """
+            CREATE TABLE IF NOT EXISTS promotions (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                nom VARCHAR(100) UNIQUE NOT NULL,
+                nom VARCHAR(50) UNIQUE NOT NULL,
                 code VARCHAR(20) UNIQUE NOT NULL,
-                faculte_id INT,
                 description TEXT,
                 date_creation DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (faculte_id) REFERENCES faculties(id) ON DELETE SET NULL,
-                INDEX idx_code (code),
-                INDEX idx_faculte (faculte_id)
+                INDEX idx_code (code)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
             
-            # Table des cours
-            courses_table = """
-            CREATE TABLE IF NOT EXISTS courses (
+            # Table des étudiants
+            students_table = """
+            CREATE TABLE IF NOT EXISTS students (
                 id INT AUTO_INCREMENT PRIMARY KEY,
+                matricule VARCHAR(50) UNIQUE NOT NULL,
                 nom VARCHAR(100) NOT NULL,
-                code VARCHAR(20) UNIQUE NOT NULL,
-                departement_id INT,
-                credit INT DEFAULT 3,
-                description TEXT,
+                prenom VARCHAR(100) NOT NULL,
+                email VARCHAR(100),
+                telephone VARCHAR(20),
+                faculte_id INT,
+                promotion_id INT,
+                photo_path VARCHAR(255),
+                embedding_path VARCHAR(255),
+                num_photos INT DEFAULT 0,
                 date_creation DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (departement_id) REFERENCES departments(id) ON DELETE SET NULL,
-                INDEX idx_code (code),
-                INDEX idx_departement (departement_id)
+                date_modification DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (faculte_id) REFERENCES faculties(id) ON DELETE SET NULL,
+                FOREIGN KEY (promotion_id) REFERENCES promotions(id) ON DELETE SET NULL,
+                INDEX idx_matricule (matricule),
+                INDEX idx_faculte (faculte_id),
+                INDEX idx_promotion (promotion_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
             
@@ -184,7 +179,6 @@ class MySQLService:
             CREATE TABLE IF NOT EXISTS attendance (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 student_id INT NOT NULL,
-                course_id INT,
                 date_presence DATETIME NOT NULL,
                 statut ENUM('present', 'absent', 'retard') DEFAULT 'present',
                 methode ENUM('facial', 'manuel', 'qrcode') DEFAULT 'facial',
@@ -194,9 +188,7 @@ class MySQLService:
                 notes TEXT,
                 date_creation DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
-                FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE SET NULL,
                 INDEX idx_student (student_id),
-                INDEX idx_course (course_id),
                 INDEX idx_date (date_presence),
                 INDEX idx_statut (statut)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -230,10 +222,10 @@ class MySQLService:
             
             # Exécuter les créations de tables
             tables = [
+                users_table,
+                faculties_table,
+                promotions_table,
                 students_table,
-                faculties_table, 
-                departments_table,
-                courses_table,
                 attendance_table,
                 reports_table,
                 settings_table
@@ -250,13 +242,140 @@ class MySQLService:
             logger.error(f"Erreur lors de la création des tables: {e}")
             return False
     
+    def save_setting(self, cle: str, valeur: str, description: str = None) -> bool:
+        """
+        Sauvegarde ou met à jour un paramètre dans la table settings
+        
+        Args:
+            cle: Clé du paramètre
+            valeur: Valeur du paramètre (sera convertie en JSON si c'est un dict)
+            description: Description du paramètre (optionnel)
+            
+        Returns:
+            True si réussi, False sinon
+        """
+        if not self.connection or not self.connection.is_connected():
+            if not self.connect():
+                return False
+        
+        try:
+            import json
+            
+            # Convertir en JSON si c'est un dict
+            if isinstance(valeur, (dict, list)):
+                valeur = json.dumps(valeur)
+            
+            query = """
+            INSERT INTO settings (cle, valeur, description)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE 
+                valeur = VALUES(valeur),
+                description = VALUES(description),
+                date_modification = CURRENT_TIMESTAMP
+            """
+            
+            self.cursor.execute(query, (cle, valeur, description))
+            self.connection.commit()
+            
+            logger.info(f"Paramètre sauvegardé: {cle}")
+            return True
+            
+        except Error as e:
+            logger.error(f"Erreur lors de la sauvegarde du paramètre: {e}")
+            return False
+    
+    def get_setting(self, cle: str, default=None):
+        """
+        Récupère un paramètre depuis la table settings
+        
+        Args:
+            cle: Clé du paramètre
+            default: Valeur par défaut si le paramètre n'existe pas
+            
+        Returns:
+            Valeur du paramètre ou default
+        """
+        if not self.connection or not self.connection.is_connected():
+            if not self.connect():
+                return default
+        
+        try:
+            import json
+            
+            query = "SELECT valeur FROM settings WHERE cle = %s"
+            self.cursor.execute(query, (cle,))
+            result = self.cursor.fetchone()
+            
+            if result:
+                valeur = result[0]
+                # Essayer de parser comme JSON
+                try:
+                    parsed = json.loads(valeur)
+                    # Convertir les entiers 1/0 en booléens pour les clés spécifiques
+                    bool_keys = ['anti_spoof_enabled', 'debug_mode', 'enable_auto_late_detection', 
+                                 'enable_daily_duplicate_check', 'enable_auto_absence_calculation']
+                    if cle in bool_keys and isinstance(parsed, int):
+                        return bool(parsed)
+                    # Convertir les entiers 1/0 en booléens si le default est un booléen
+                    if isinstance(default, bool) and isinstance(parsed, int):
+                        return bool(parsed)
+                    return parsed
+                except (json.JSONDecodeError, TypeError):
+                    # Si ce n'est pas du JSON, essayer de convertir en booléen si nécessaire
+                    bool_keys = ['anti_spoof_enabled', 'debug_mode', 'enable_auto_late_detection', 
+                                 'enable_daily_duplicate_check', 'enable_auto_absence_calculation']
+                    if cle in bool_keys and isinstance(valeur, int):
+                        return bool(valeur)
+                    if isinstance(default, bool) and isinstance(valeur, int):
+                        return bool(valeur)
+                    return valeur
+            
+            return default
+            
+        except Error as e:
+            logger.error(f"Erreur lors de la récupération du paramètre: {e}")
+            return default
+    
+    def get_all_settings(self) -> dict:
+        """
+        Récupère tous les paramètres depuis la table settings
+        
+        Returns:
+            Dictionnaire des paramètres
+        """
+        if not self.connection or not self.connection.is_connected():
+            if not self.connect():
+                return {}
+        
+        try:
+            import json
+            
+            query = "SELECT cle, valeur FROM settings"
+            self.cursor.execute(query)
+            results = self.cursor.fetchall()
+            
+            settings = {}
+            for cle, valeur in results:
+                # Essayer de parser comme JSON
+                try:
+                    settings[cle] = json.loads(valeur)
+                except (json.JSONDecodeError, TypeError):
+                    settings[cle] = valeur
+            
+            logger.info(f"Récupéré {len(settings)} paramètres depuis MySQL")
+            return settings
+            
+        except Error as e:
+            logger.error(f"Erreur lors de la récupération des paramètres: {e}")
+            return {}
+    
     def insert_student(self, matricule: str, nom: str, prenom: str, 
                      email: str = None, telephone: str = None, 
-                     faculte_id: int = None, departement_id: int = None,
-                     annee_etude: int = None, photo_path: str = None,
+                     faculte_id: int = None, promotion_id: int = None,
+                     photo_path: str = None,
                      embedding_path: str = None) -> Optional[int]:
         """
-        Insère un nouvel étudiant dans la base de données
+        Insère un nouvel étudiant dans la base de données ou met à jour si le matricule existe déjà
         
         Args:
             matricule: Matricule de l'étudiant
@@ -265,13 +384,75 @@ class MySQLService:
             email: Email de l'étudiant
             telephone: Téléphone de l'étudiant
             faculte_id: ID de la faculté
-            departement_id: ID du département
-            annee_etude: Année d'étude
+            promotion_id: ID de la promotion
             photo_path: Chemin vers la photo
             embedding_path: Chemin vers l'embedding
             
         Returns:
-            ID de l'étudiant inséré, None en cas d'erreur
+            ID de l'étudiant inséré/mis à jour, None en cas d'erreur
+        """
+        if not self.connection or not self.connection.is_connected():
+            if not self.connect():
+                return None
+        
+        try:
+            # Vérifier si le matricule existe déjà
+            self.cursor.execute("SELECT id FROM students WHERE matricule = %s", (matricule,))
+            existing = self.cursor.fetchone()
+            
+            if existing:
+                # Mettre à jour l'étudiant existant
+                student_id = existing[0]
+                query = """
+                UPDATE students 
+                SET nom = %s, prenom = %s, email = %s, telephone = %s,
+                    faculte_id = %s, promotion_id = %s,
+                    photo_path = %s, embedding_path = %s
+                WHERE id = %s
+                """
+                values = (nom, prenom, email, telephone, 
+                         faculte_id, promotion_id, 
+                         photo_path, embedding_path, student_id)
+                
+                self.cursor.execute(query, values)
+                self.connection.commit()
+                logger.info(f"Étudiant mis à jour: {matricule} (ID: {student_id})")
+                return student_id
+            else:
+                # Insérer un nouvel étudiant
+                query = """
+                INSERT INTO students (matricule, nom, prenom, email, telephone, 
+                                     faculte_id, promotion_id, 
+                                     photo_path, embedding_path)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                
+                values = (matricule, nom, prenom, email, telephone, 
+                         faculte_id, promotion_id, 
+                         photo_path, embedding_path)
+                
+                self.cursor.execute(query, values)
+                self.connection.commit()
+                
+                student_id = self.cursor.lastrowid
+                logger.info(f"Étudiant inséré: {matricule} (ID: {student_id})")
+                return student_id
+            
+        except Error as e:
+            logger.error(f"Erreur lors de l'insertion/mise à jour de l'étudiant: {e}")
+            return None
+    
+    def insert_promotion(self, nom: str, code: str, description: str = None) -> Optional[int]:
+        """
+        Insère une nouvelle promotion
+        
+        Args:
+            nom: Nom de la promotion (ex: L1, L2, M1, M2)
+            code: Code de la promotion
+            description: Description de la promotion
+            
+        Returns:
+            ID de la promotion insérée, None en cas d'erreur
         """
         if not self.connection or not self.connection.is_connected():
             if not self.connect():
@@ -279,25 +460,101 @@ class MySQLService:
         
         try:
             query = """
-            INSERT INTO students (matricule, nom, prenom, email, telephone, 
-                                 faculte_id, departement_id, annee_etude, 
-                                 photo_path, embedding_path)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO promotions (nom, code, description)
+            VALUES (%s, %s, %s)
             """
             
-            values = (matricule, nom, prenom, email, telephone, 
-                     faculte_id, departement_id, annee_etude, 
-                     photo_path, embedding_path)
+            values = (nom, code, description)
             
             self.cursor.execute(query, values)
             self.connection.commit()
             
-            student_id = self.cursor.lastrowid
-            logger.info(f"Étudiant inséré: {matricule} (ID: {student_id})")
-            return student_id
+            promotion_id = self.cursor.lastrowid
+            logger.info(f"Promotion insérée: {nom} (ID: {promotion_id})")
+            return promotion_id
             
         except Error as e:
-            logger.error(f"Erreur lors de l'insertion de l'étudiant: {e}")
+            logger.error(f"Erreur lors de l'insertion de la promotion: {e}")
+            return None
+    
+    def get_all_faculties(self) -> List[Dict]:
+        """
+        Récupère toutes les facultés
+        
+        Returns:
+            Liste de dictionnaires contenant les informations des facultés
+        """
+        if not self.connection or not self.connection.is_connected():
+            if not self.connect():
+                return []
+        
+        try:
+            query = "SELECT * FROM faculties ORDER BY nom"
+            self.cursor.execute(query)
+            results = self.cursor.fetchall()
+            
+            columns = [desc[0] for desc in self.cursor.description]
+            faculties = [dict(zip(columns, row)) for row in results]
+            
+            logger.info(f"Récupéré {len(faculties)} facultés")
+            return faculties
+            
+        except Error as e:
+            logger.error(f"Erreur lors de la récupération des facultés: {e}")
+            return []
+    
+    def get_all_promotions(self) -> List[Dict]:
+        """
+        Récupère toutes les promotions
+        
+        Returns:
+            Liste de dictionnaires contenant les informations des promotions
+        """
+        if not self.connection or not self.connection.is_connected():
+            if not self.connect():
+                return []
+        
+        try:
+            query = "SELECT * FROM promotions ORDER BY nom"
+            self.cursor.execute(query)
+            results = self.cursor.fetchall()
+            
+            columns = [desc[0] for desc in self.cursor.description]
+            promotions = [dict(zip(columns, row)) for row in results]
+            
+            logger.info(f"Récupéré {len(promotions)} promotions")
+            return promotions
+            
+        except Error as e:
+            logger.error(f"Erreur lors de la récupération des promotions: {e}")
+            return []
+    
+    def get_promotion_by_id(self, promotion_id: int) -> Optional[Dict]:
+        """
+        Récupère une promotion par son ID
+        
+        Args:
+            promotion_id: ID de la promotion
+            
+        Returns:
+            Dictionnaire contenant les informations de la promotion, None si non trouvé
+        """
+        if not self.connection or not self.connection.is_connected():
+            if not self.connect():
+                return None
+        
+        try:
+            query = "SELECT * FROM promotions WHERE id = %s"
+            self.cursor.execute(query, (promotion_id,))
+            result = self.cursor.fetchone()
+            
+            if result:
+                columns = [desc[0] for desc in self.cursor.description]
+                return dict(zip(columns, result))
+            return None
+            
+        except Error as e:
+            logger.error(f"Erreur lors de la récupération de la promotion: {e}")
             return None
     
     def get_student_by_matricule(self, matricule: str) -> Optional[Dict]:
@@ -469,7 +726,7 @@ class MySQLService:
         
         Args:
             student_id: ID de l'étudiant
-            course_id: ID du cours
+            course_id: ID du cours (ignoré, plus utilisé)
             statut: Statut de présence (present, absent, retard)
             methode: Méthode de pointage (facial, manuel, qrcode)
             confiance: Score de confiance de la reconnaissance
@@ -486,13 +743,13 @@ class MySQLService:
         
         try:
             query = """
-            INSERT INTO attendance (student_id, course_id, date_presence, 
+            INSERT INTO attendance (student_id, date_presence, 
                                    statut, methode, confiance, 
                                    photo_capture_path, camera_id, notes)
-            VALUES (%s, %s, NOW(), %s, %s, %s, %s, %s, %s)
+            VALUES (%s, NOW(), %s, %s, %s, %s, %s, %s)
             """
             
-            values = (student_id, course_id, statut, methode, confiance,
+            values = (student_id, statut, methode, confiance,
                      photo_capture_path, camera_id, notes)
             
             self.cursor.execute(query, values)
@@ -553,13 +810,21 @@ class MySQLService:
             self.cursor.execute("SELECT COUNT(*) FROM faculties")
             stats['total_faculties'] = self.cursor.fetchone()[0]
             
-            # Nombre de départements
-            self.cursor.execute("SELECT COUNT(*) FROM departments")
-            stats['total_departments'] = self.cursor.fetchone()[0]
+            # Nombre de promotions
+            self.cursor.execute("SELECT COUNT(*) FROM promotions")
+            stats['total_promotions'] = self.cursor.fetchone()[0]
             
             # Présences aujourd'hui
             self.cursor.execute("SELECT COUNT(*) FROM attendance WHERE DATE(date_presence) = CURDATE()")
             stats['attendance_today'] = self.cursor.fetchone()[0]
+            
+            # Présents aujourd'hui
+            self.cursor.execute("SELECT COUNT(*) FROM attendance WHERE DATE(date_presence) = CURDATE() AND statut = 'present'")
+            stats['present_today'] = self.cursor.fetchone()[0]
+            
+            # Retards aujourd'hui
+            self.cursor.execute("SELECT COUNT(*) FROM attendance WHERE DATE(date_presence) = CURDATE() AND statut = 'retard'")
+            stats['late_today'] = self.cursor.fetchone()[0]
             
             return stats
             
@@ -610,4 +875,272 @@ class MySQLService:
             
         except Error as e:
             logger.error(f"Erreur lors de la récupération des derniers pointages: {e}")
+            return []
+    
+    def get_student_attendance_today(self, student_id: int) -> Optional[Dict]:
+        """
+        Vérifie si un étudiant a déjà été enregistré aujourd'hui (RÈGLE 4: Anti-doublon)
+        
+        Args:
+            student_id: ID de l'étudiant
+            
+        Returns:
+            Dictionnaire avec les informations de présence si trouvé, None sinon
+        """
+        if not self.connection or not self.connection.is_connected():
+            if not self.connect():
+                return None
+        
+        try:
+            query = """
+            SELECT id, student_id, date_presence, statut, methode, confiance
+            FROM attendance
+            WHERE student_id = %s AND DATE(date_presence) = CURDATE()
+            LIMIT 1
+            """
+            self.cursor.execute(query, (student_id,))
+            result = self.cursor.fetchone()
+            
+            if result:
+                return {
+                    'id': result[0],
+                    'student_id': result[1],
+                    'date_presence': result[2],
+                    'statut': result[3],
+                    'methode': result[4],
+                    'confiance': result[5]
+                }
+            
+            return None
+            
+        except Error as e:
+            logger.error(f"Erreur lors de la vérification de présence aujourd'hui: {e}")
+            return None
+    
+    def get_daily_report(self, date: str = None) -> Dict:
+        """
+        Génère le rapport journalier
+        
+        Args:
+            date: Date au format YYYY-MM-DD (défaut: aujourd'hui)
+            
+        Returns:
+            Dictionnaire avec les statistiques du jour
+        """
+        if not self.connection or not self.connection.is_connected():
+            if not self.connect():
+                return {}
+        
+        try:
+            if date is None:
+                date = datetime.now().strftime('%Y-%m-%d')
+            
+            query = """
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN statut = 'present' THEN 1 ELSE 0 END) as presents,
+                SUM(CASE WHEN statut = 'absent' THEN 1 ELSE 0 END) as absents,
+                SUM(CASE WHEN statut = 'retard' THEN 1 ELSE 0 END) as retards
+            FROM attendance
+            WHERE DATE(date_presence) = %s
+            """
+            
+            self.cursor.execute(query, (date,))
+            result = self.cursor.fetchone()
+            
+            return {
+                'date': date,
+                'total': result[0],
+                'presents': result[1] or 0,
+                'absents': result[2] or 0,
+                'retards': result[3] or 0
+            }
+            
+        except Error as e:
+            logger.error(f"Erreur lors de la génération du rapport journalier: {e}")
+            return {}
+    
+    def get_faculty_report(self, faculty_id: int = None) -> Dict:
+        """
+        Génère le rapport par faculté
+        
+        Args:
+            faculty_id: ID de la faculté (si None, rapport pour toutes les facultés)
+            
+        Returns:
+            Dictionnaire avec les statistiques par faculté
+        """
+        if not self.connection or not self.connection.is_connected():
+            if not self.connect():
+                return {}
+        
+        try:
+            if faculty_id:
+                query = """
+                SELECT 
+                    f.nom as faculty_nom,
+                    COUNT(DISTINCT s.id) as total_students,
+                    COUNT(DISTINCT CASE WHEN a.statut = 'present' THEN a.student_id END) as presents,
+                    COUNT(DISTINCT CASE WHEN a.statut = 'retard' THEN a.student_id END) as retards,
+                    COUNT(DISTINCT s.id) - COUNT(DISTINCT CASE WHEN a.statut = 'present' THEN a.student_id END) - COUNT(DISTINCT CASE WHEN a.statut = 'retard' THEN a.student_id END) as absents
+                FROM faculties f
+                LEFT JOIN students s ON f.id = s.faculte_id
+                LEFT JOIN attendance a ON s.id = a.student_id AND DATE(a.date_presence) = CURDATE()
+                WHERE f.id = %s
+                GROUP BY f.id, f.nom
+                """
+                self.cursor.execute(query, (faculty_id,))
+            else:
+                query = """
+                SELECT 
+                    f.nom as faculty_nom,
+                    COUNT(DISTINCT s.id) as total_students,
+                    COUNT(DISTINCT CASE WHEN a.statut = 'present' THEN a.student_id END) as presents,
+                    COUNT(DISTINCT CASE WHEN a.statut = 'retard' THEN a.student_id END) as retards,
+                    COUNT(DISTINCT s.id) - COUNT(DISTINCT CASE WHEN a.statut = 'present' THEN a.student_id END) - COUNT(DISTINCT CASE WHEN a.statut = 'retard' THEN a.student_id END) as absents
+                FROM faculties f
+                LEFT JOIN students s ON f.id = s.faculte_id
+                LEFT JOIN attendance a ON s.id = a.student_id AND DATE(a.date_presence) = CURDATE()
+                GROUP BY f.id, f.nom
+                """
+                self.cursor.execute(query)
+            
+            results = self.cursor.fetchall()
+            
+            if faculty_id and results:
+                return {
+                    'faculty_nom': results[0][0],
+                    'total_students': results[0][1],
+                    'presents': results[0][2],
+                    'retards': results[0][3],
+                    'absents': results[0][4]
+                }
+            else:
+                return [
+                    {
+                        'faculty_nom': row[0],
+                        'total_students': row[1],
+                        'presents': row[2],
+                        'retards': row[3],
+                        'absents': row[4]
+                    }
+                    for row in results
+                ]
+            
+        except Error as e:
+            logger.error(f"Erreur lors de la génération du rapport par faculté: {e}")
+            return {}
+    
+    def get_promotion_report(self, promotion_id: int = None) -> Dict:
+        """
+        Génère le rapport par promotion
+        
+        Args:
+            promotion_id: ID de la promotion (si None, rapport pour toutes les promotions)
+            
+        Returns:
+            Dictionnaire avec les statistiques par promotion
+        """
+        if not self.connection or not self.connection.is_connected():
+            if not self.connect():
+                return {}
+        
+        try:
+            if promotion_id:
+                query = """
+                SELECT 
+                    p.nom as promotion_nom,
+                    COUNT(DISTINCT s.id) as total_students,
+                    COUNT(DISTINCT CASE WHEN a.statut = 'present' THEN a.student_id END) as presents,
+                    COUNT(DISTINCT CASE WHEN a.statut = 'retard' THEN a.student_id END) as retards,
+                    COUNT(DISTINCT s.id) - COUNT(DISTINCT CASE WHEN a.statut = 'present' THEN a.student_id END) - COUNT(DISTINCT CASE WHEN a.statut = 'retard' THEN a.student_id END) as absents
+                FROM promotions p
+                LEFT JOIN students s ON p.id = s.promotion_id
+                LEFT JOIN attendance a ON s.id = a.student_id AND DATE(a.date_presence) = CURDATE()
+                WHERE p.id = %s
+                GROUP BY p.id, p.nom
+                """
+                self.cursor.execute(query, (promotion_id,))
+            else:
+                query = """
+                SELECT 
+                    p.nom as promotion_nom,
+                    COUNT(DISTINCT s.id) as total_students,
+                    COUNT(DISTINCT CASE WHEN a.statut = 'present' THEN a.student_id END) as presents,
+                    COUNT(DISTINCT CASE WHEN a.statut = 'retard' THEN a.student_id END) as retards,
+                    COUNT(DISTINCT s.id) - COUNT(DISTINCT CASE WHEN a.statut = 'present' THEN a.student_id END) - COUNT(DISTINCT CASE WHEN a.statut = 'retard' THEN a.student_id END) as absents
+                FROM promotions p
+                LEFT JOIN students s ON p.id = s.promotion_id
+                LEFT JOIN attendance a ON s.id = a.student_id AND DATE(a.date_presence) = CURDATE()
+                GROUP BY p.id, p.nom
+                """
+                self.cursor.execute(query)
+            
+            results = self.cursor.fetchall()
+            
+            if promotion_id and results:
+                return {
+                    'promotion_nom': results[0][0],
+                    'total_students': results[0][1],
+                    'presents': results[0][2],
+                    'retards': results[0][3],
+                    'absents': results[0][4]
+                }
+            else:
+                return [
+                    {
+                        'promotion_nom': row[0],
+                        'total_students': row[1],
+                        'presents': row[2],
+                        'retards': row[3],
+                        'absents': row[4]
+                    }
+                    for row in results
+                ]
+            
+        except Error as e:
+            logger.error(f"Erreur lors de la génération du rapport par promotion: {e}")
+            return {}
+    
+    def get_student_attendance_history(self, student_id: int, limit: int = 30) -> List[Dict]:
+        """
+        Récupère l'historique de présence d'un étudiant
+        
+        Args:
+            student_id: ID de l'étudiant
+            limit: Nombre maximum d'enregistrements à récupérer
+            
+        Returns:
+            Liste des enregistrements de présence avec date et statut
+        """
+        if not self.connection or not self.connection.is_connected():
+            if not self.connect():
+                return []
+        
+        try:
+            query = """
+            SELECT a.date_presence, a.statut, a.methode, a.confiance
+            FROM attendance a
+            WHERE a.student_id = %s
+            ORDER BY a.date_presence DESC
+            LIMIT %s
+            """
+            
+            self.cursor.execute(query, (student_id, limit))
+            results = self.cursor.fetchall()
+            
+            attendance_history = []
+            for row in results:
+                attendance_history.append({
+                    'date': row[0].strftime('%d/%m/%Y %H:%M') if row[0] else '',
+                    'statut': row[1],
+                    'methode': row[2],
+                    'confiance': row[3]
+                })
+            
+            logger.info(f"Historique récupéré pour étudiant {student_id}: {len(attendance_history)} enregistrements")
+            return attendance_history
+            
+        except Error as e:
+            logger.error(f"Erreur lors de la récupération de l'historique: {e}")
             return []

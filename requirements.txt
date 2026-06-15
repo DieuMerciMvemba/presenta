@@ -1,6 +1,7 @@
 # Python Version: 3.13.3
 # Compatible avec Python 3.9+
 
+python-dotenv>=1.0.0
 requests>=2.27.1
 numpy>=1.14.0
 pandas>=0.23.4
@@ -28,3 +29,4 @@ insightface
 onnxruntime
 faiss-cpu
 mysql-connector-python
+kivy

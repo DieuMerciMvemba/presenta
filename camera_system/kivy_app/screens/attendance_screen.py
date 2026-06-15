@@ -20,7 +20,7 @@ import json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from realtime_detector import RealtimeFaceDetector
-from services.mysql_service import MySQLService
+from services.database_service import DatabaseService
 
 Builder.load_string('''
 <AttendanceScreen>:
@@ -149,10 +149,19 @@ Builder.load_string('''
                         text: '⏹️ Arrêter'
                         background_color: 0.86, 0.21, 0.27, 1.0
                         color: 1, 1, 1, 1
-                        size_hint_x: 0.3
+                        size_hint_x: 0.25
                         font_name: 'Arial'
                         font_size: 12
                         on_release: root.stop_attendance()
+                        
+                    Button:
+                        text: '🔄 Recharger'
+                        background_color: 0.09, 0.64, 0.72, 1.0
+                        color: 1, 1, 1, 1
+                        size_hint_x: 0.25
+                        font_name: 'Arial'
+                        font_size: 12
+                        on_release: root.load_settings()
                 
                 # Informations de session
                 BoxLayout:
@@ -355,11 +364,12 @@ class AttendanceScreen(Screen):
     """Écran Pointage Caméra avec Anti-Spoofing"""
     
     is_active = BooleanProperty(False)
-    anti_spoof_active = BooleanProperty(True)
+    anti_spoof_active = BooleanProperty(False)
     detected_count = NumericProperty(0)
     recognized_count = NumericProperty(0)
     spoof_count = NumericProperty(0)
     threshold = NumericProperty(0.5)
+    spoof_threshold = NumericProperty(0.85)
     session_duration = StringProperty("00:00:00")
     anti_spoof_color = ListProperty([0.16, 0.65, 0.26, 1])
     last_recognized = StringProperty("Aucun")
@@ -379,6 +389,12 @@ class AttendanceScreen(Screen):
         self.session_seconds = 0
         self.update_anti_spoof_color()
         
+        # Initialiser les paramètres de règles par défaut
+        self.late_time_limit = "08:00"
+        self.enable_auto_late_detection = True
+        self.enable_daily_duplicate_check = True
+        self.enable_auto_absence_calculation = True
+        
         # Charger les paramètres de configuration
         self.load_settings()
         
@@ -389,10 +405,14 @@ class AttendanceScreen(Screen):
             from vector_db import LocalVectorDB
             from pipeline import FacePipeline
             from anti_spoof import AntiSpoofDetector
+            from config import Config
             
-            # Initialiser la base de données
-            os.makedirs("data", exist_ok=True)
-            self.db = LocalVectorDB(index_path="data/facerec_faiss.index", metadata_path="data/students_metadata.pkl")
+            # Initialiser la base de données (chemin absolu via Config pour éviter les erreurs de CWD)
+            os.makedirs(Config.DATA_PATH, exist_ok=True)
+            self.db = LocalVectorDB(
+                index_path=os.path.join(Config.DATA_PATH, "facerec_faiss.index"),
+                metadata_path=os.path.join(Config.DATA_PATH, "students_metadata.pkl")
+            )
             print(f"✅ Base de données chargée: {self.db.get_student_count()} étudiants")
             
             # Initialiser le pipeline
@@ -408,7 +428,6 @@ class AttendanceScreen(Screen):
             # Stocker les paramètres pour la caméra
             self.camera_index = self.camera_index
             self.threshold = self.threshold
-            self.spoof_threshold = 0.85
             
             # Variables pour le suivi des étudiants présents
             self.present_students = set()
@@ -422,18 +441,18 @@ class AttendanceScreen(Screen):
             self.pipeline = None
             self.anti_spoof = None
         
-        # Initialiser MySQLService pour l'enregistrement des présences
+        # Initialiser DatabaseService pour l'enregistrement des présences
         try:
-            self.db_service = MySQLService(
+            self.db_service = DatabaseService(
                 host='localhost',
                 database='ucc_face_recognition',
                 user='root',
                 password='admin123',
                 port=3306
             )
-            print("✅ MySQLService initialisé")
+            print("✅ DatabaseService initialisé")
         except Exception as e:
-            print(f"❌ Erreur lors de l'initialisation de MySQLService: {e}")
+            print(f"❌ Erreur lors de l'initialisation de DatabaseService: {e}")
             self.db_service = None
     
     def update_anti_spoof_color(self):
@@ -453,27 +472,47 @@ class AttendanceScreen(Screen):
         self.load_settings()  # Recharger les paramètres à chaque entrée
     
     def load_settings(self):
-        """Charge les paramètres de configuration depuis le fichier JSON"""
+        """Charge les paramètres de configuration depuis MySQL"""
         try:
-            settings_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'config', 'settings.json')
+            from services.mysql_service import MySQLService
             
-            if os.path.exists(settings_file):
-                with open(settings_file, 'r') as f:
-                    settings = json.load(f)
-                
-                # Appliquer les paramètres chargés
-                self.threshold = settings.get('threshold', 0.5)
-                self.anti_spoof_active = settings.get('anti_spoof_enabled', True)
-                self.camera_index = settings.get('camera_index', 0)
-                self.resolution = settings.get('resolution', "1280x720")
-                
-                print(f"✅ Paramètres chargés dans AttendanceScreen: threshold={self.threshold}, anti_spoof={self.anti_spoof_active}")
-            else:
-                print(f"ℹ️ Fichier de paramètres non trouvé, utilisation des valeurs par défaut")
+            mysql_service = MySQLService(
+                host='localhost',
+                database='ucc_face_recognition',
+                user='root',
+                password='admin123',
+                port=3306
+            )
+            
+            # Charger depuis MySQL
+            self.threshold = mysql_service.get_setting('threshold', 0.5)
+            self.spoof_threshold = mysql_service.get_setting('spoof_threshold', 0.85)
+            self.anti_spoof_active = mysql_service.get_setting('anti_spoof_enabled', False)
+            self.camera_index = mysql_service.get_setting('camera_index', 0)
+            self.resolution = mysql_service.get_setting('resolution', "1280x720")
+            self.session_duration_limit = mysql_service.get_setting('session_duration', 60)
+            
+            # Charger les paramètres de règles de présence
+            attendance_rules = mysql_service.get_setting('attendance_rules', {})
+            self.late_time_limit = attendance_rules.get('late_time_limit', "08:00")
+            self.enable_auto_late_detection = attendance_rules.get('enable_auto_late_detection', True)
+            self.enable_daily_duplicate_check = attendance_rules.get('enable_daily_duplicate_check', True)
+            self.enable_auto_absence_calculation = attendance_rules.get('enable_auto_absence_calculation', True)
+            
+            print(f"✅ Paramètres chargés dans AttendanceScreen depuis MySQL: threshold={self.threshold}, spoof_threshold={self.spoof_threshold}, anti_spoof={self.anti_spoof_active}")
+            print(f"✅ Règles de présence: late_time_limit={self.late_time_limit}, auto_late={self.enable_auto_late_detection}, duplicate_check={self.enable_daily_duplicate_check}")
+            
+            # Mettre à jour l'indicateur anti-spoofing
+            self.update_anti_spoof_color()
                 
         except Exception as e:
-            print(f"❌ Erreur lors du chargement des paramètres: {e}")
+            print(f"❌ Erreur lors du chargement des paramètres depuis MySQL: {e}")
             print(f"ℹ️ Utilisation des valeurs par défaut")
+            # Valeurs par défaut pour les règles
+            self.late_time_limit = "08:00"
+            self.enable_auto_late_detection = True
+            self.enable_daily_duplicate_check = True
+            self.enable_auto_absence_calculation = True
     
     def on_leave(self):
         """Appelé lorsque l'écran est quitté"""
@@ -597,6 +636,11 @@ class AttendanceScreen(Screen):
         minutes = (self.session_seconds % 3600) // 60
         seconds = self.session_seconds % 60
         self.session_duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        
+        # Vérifier si la durée de session est atteinte
+        if hasattr(self, 'session_duration_limit') and self.session_seconds >= self.session_duration_limit:
+            print(f"⏱️ Durée de session atteinte ({self.session_duration_limit} secondes)")
+            self.stop_attendance()
     
     def process_camera_frame(self, dt):
         """
@@ -627,14 +671,27 @@ class AttendanceScreen(Screen):
             if pixels is None:
                 return
             
-            # Convertir en numpy array (format RGB -> BGR pour OpenCV)
+            # Convertir en numpy array de manière robuste selon le format de couleur
             import numpy as np
             import cv2
             import time
+            
+            colorfmt = texture.colorfmt
+            channels = 4 if 'alpha' in colorfmt or len(colorfmt) == 4 else 3
+            
             frame = np.frombuffer(pixels, dtype=np.uint8)
-            frame = frame.reshape(texture.height, texture.width, 4)  # RGBA
-            frame = frame[:, :, :3]  # Garder seulement RGB
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)  # Convertir RGB en BGR pour OpenCV
+            frame = frame.reshape(texture.height, texture.width, channels)
+            
+            # Convertir dans le format BGR attendu par OpenCV
+            if colorfmt == 'rgba':
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+            elif colorfmt == 'rgb':
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            elif colorfmt == 'bgra':
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+            else:
+                # Fallback
+                frame = frame[:, :, :3]
             
             # ÉTAPE 2: MTCNN (Multi-visages) - Détection de tous les visages dans la frame
             faces = self.pipeline.detector.detect_faces(frame)
@@ -651,7 +708,12 @@ class AttendanceScreen(Screen):
                 x, y, w, h = bbox
                 
                 # ÉTAPE 3: BARRIÈRE ANTI-SPOOFING (Vérification de vivacité)
-                is_real, spoof_score = self.anti_spoof.is_real(frame, bbox, threshold=self.spoof_threshold)
+                # Vérifier si l'anti-spoofing est activé dans les paramètres
+                if self.anti_spoof_active and self.anti_spoof:
+                    is_real, spoof_score = self.anti_spoof.is_real(frame, bbox, threshold=self.spoof_threshold)
+                else:
+                    # Si l'anti-spoofing est désactivé, considérer tous les visages comme réels
+                    is_real, spoof_score = True, 1.0
                 
                 if not is_real:
                     print(f"🚨 TENTATIVE DE FRAUDE DÉTECTÉE ! Score de vivacité : {spoof_score:.4f}")
@@ -746,9 +808,10 @@ class AttendanceScreen(Screen):
                 if similarity >= self.threshold:
                     student_id = result[0]['student_id']
                     # Récupérer les informations de l'étudiant depuis MySQL
-                    student = self.db_service.get_student_by_id(student_id)
-                    if student:
-                        return student
+                    student_data = self.db_service.find_student_by_id(student_id)
+                    if student_data:
+                        # Accéder aux métadonnées de l'étudiant
+                        return student_data.get('metadata', student_data)
             
             return None
             
@@ -772,11 +835,10 @@ class AttendanceScreen(Screen):
             today = datetime.now().date()
             
             # Enregistrer la présence
-            attendance_id = self.db_service.insert_attendance(
+            attendance_id = self.db_service.record_attendance(
                 student_id=student['id'],
-                date_presence=datetime.now(),
                 statut='present',
-                methode='facial_recognition',
+                methode='facial',
                 confiance=0.95  # Confiance par défaut
             )
             
@@ -805,18 +867,50 @@ class AttendanceScreen(Screen):
                 return
             
             # Récupérer l'étudiant depuis MySQL pour obtenir son ID
-            student = self.db_service.get_student_by_matricule(matricule)
-            if not student:
+            student_data = self.db_service.find_student_by_matricule(matricule)
+            if not student_data:
                 print(f"❌ Étudiant avec matricule {matricule} non trouvé dans MySQL")
                 return
             
+            # Accéder aux métadonnées de l'étudiant
+            student = student_data.get('metadata', student_data)
+            student_id = student['id']
+            
+            # RÈGLE 4: Anti-doublon journalier
+            if self.enable_daily_duplicate_check:
+                from datetime import datetime
+                today = datetime.now().date()
+                
+                # Vérifier si l'étudiant a déjà été enregistré aujourd'hui
+                existing_attendance = self.db_service.get_student_attendance_today(student_id)
+                if existing_attendance:
+                    print(f"⚠️ Étudiant {matricule} déjà enregistré aujourd'hui (anti-doublon)")
+                    return
+            
+            # RÈGLE 5: Détermination automatique du retard
+            statut = 'present'
+            if self.enable_auto_late_detection:
+                from datetime import datetime
+                current_time = datetime.now().time()
+                
+                # Convertir l'heure limite en objet time
+                try:
+                    late_limit = datetime.strptime(self.late_time_limit, "%H:%M").time()
+                    
+                    # Si l'heure actuelle est après l'heure limite, statut = retard
+                    if current_time > late_limit:
+                        statut = 'retard'
+                        print(f"⏰ Étudiant {matricule} en retard (heure: {current_time}, limite: {late_limit})")
+                except Exception as e:
+                    print(f"❌ Erreur lors de la détermination du retard: {e}")
+            
             # Enregistrer la présence dans MySQL
             from datetime import datetime
-            attendance_id = self.db_service.insert_attendance(
-                student_id=student['id'],
+            attendance_id = self.db_service.record_attendance(
+                student_id=student_id,
                 course_id=None,
-                statut='present',
-                methode='facial_recognition',
+                statut=statut,
+                methode='facial',
                 confiance=face_info.get('similarity', 0.0),
                 photo_capture_path=None,
                 camera_id=str(self.camera_index),
@@ -824,7 +918,7 @@ class AttendanceScreen(Screen):
             )
             
             if attendance_id:
-                print(f"✅ Présence enregistrée pour {matricule} (ID: {attendance_id})")
+                print(f"✅ Présence enregistrée pour {matricule} (statut: {statut}, ID: {attendance_id})")
             else:
                 print(f"❌ Erreur lors de l'enregistrement de la présence pour {matricule}")
         except Exception as e:
